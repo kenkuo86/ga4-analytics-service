@@ -139,6 +139,10 @@ class OAuthFlowTests(unittest.TestCase):
         return self.client.post("/token", data=data, headers=self.headers)
 
     def test_discovery_and_unauthenticated_endpoints(self):
+        health = self.client.get("/health", headers=self.headers)
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.json(), {"status": "ok"})
+
         metadata = self.client.get("/.well-known/oauth-authorization-server", headers=self.headers)
         self.assertEqual(metadata.status_code, 200)
         body = metadata.json()

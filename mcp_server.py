@@ -48,8 +48,8 @@ if oauth_runtime.provider is not None:
         return jwks_response(oauth_provider)
 
 
-@mcp.custom_route("/healthz", methods=["GET"])
-async def healthz(request: Request):
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
