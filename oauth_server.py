@@ -447,7 +447,13 @@ class GoogleOAuthAuthorizationServer(
             content,
             headers={
                 "Cache-Control": "no-store",
-                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+                # Chrome applies form-action to redirects after a form POST.
+                # The consent POST stays on this origin, then redirects to the
+                # one pre-registered Claude callback to finish OAuth.
+                "Content-Security-Policy": (
+                    "default-src 'none'; style-src 'unsafe-inline'; "
+                    "form-action 'self' https://claude.ai; frame-ancestors 'none'"
+                ),
                 "Referrer-Policy": "no-referrer",
                 "X-Frame-Options": "DENY",
             },

@@ -111,6 +111,10 @@ class OAuthFlowTests(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(callback.status_code, 200, callback.text)
+        self.assertIn(
+            "form-action 'self' https://claude.ai",
+            callback.headers["content-security-policy"],
+        )
         token_match = re.search(r'name="consent_token" value="([^"]+)"', callback.text)
         self.assertIsNotNone(token_match)
 
