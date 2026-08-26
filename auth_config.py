@@ -57,15 +57,18 @@ class OAuthConfig:
     @classmethod
     def from_env(cls) -> OAuthConfig:
         issuer_url = _https_url("OAUTH_ISSUER_URL", _required_env("OAUTH_ISSUER_URL"))
-        resource_url = _https_url("MCP_PUBLIC_URL", _required_env("MCP_PUBLIC_URL"))
+        # Claude Web currently normalizes a connector URL ending in /mcp/ to
+        # /mcp. Keep /mcp as the canonical OAuth resource while the ASGI app
+        # continues to accept both transport paths.
+        resource_url = _https_url("MCP_PUBLIC_URL", _required_env("MCP_PUBLIC_URL")).rstrip("/")
         issuer = urlparse(issuer_url)
         resource = urlparse(resource_url)
         if issuer.path not in {"", "/"}:
             raise RuntimeError("OAUTH_ISSUER_URL must be the service origin without a path.")
         if (issuer.scheme, issuer.netloc) != (resource.scheme, resource.netloc):
             raise RuntimeError("OAUTH_ISSUER_URL and MCP_PUBLIC_URL must use the same origin for this PoC.")
-        if not resource_url.endswith("/mcp/"):
-            raise RuntimeError("MCP_PUBLIC_URL must end in '/mcp/'.")
+        if resource.path != "/mcp":
+            raise RuntimeError("MCP_PUBLIC_URL must use the '/mcp' path (an optional trailing slash is accepted).")
 
         raw_emails = _required_env("OAUTH_ALLOWED_EMAILS")
         allowed_emails = frozenset(email.strip().lower() for email in raw_emails.split(",") if email.strip())

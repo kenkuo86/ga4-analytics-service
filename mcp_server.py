@@ -3,6 +3,7 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, Re
 from mcp.server import MCPServer
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from main import app as api_app
 from main import get_traffic_summary
@@ -80,16 +81,36 @@ security = TransportSecuritySettings(
 
 mcp_app = mcp.streamable_http_app(
     json_response=True,
-    streamable_http_path="/mcp/",
+    streamable_http_path="/mcp",
     transport_security=security,
 )
 
-# Keep the MCP app at the ASGI root.  This lets MCP 2.1.0 expose RFC 9728
-# metadata at /.well-known/oauth-protected-resource/mcp/ rather than nesting
-# that route incorrectly below /mcp/.  The existing FastAPI app is the final
-# fallback route and therefore preserves /traffic-summary.
+# Keep the MCP app at the ASGI root. This lets MCP 2.1.0 expose RFC 9728
+# metadata at /.well-known/oauth-protected-resource/mcp rather than nesting
+# that route below /mcp. The existing FastAPI app remains the final fallback.
 mcp_app.mount("/", api_app)
-app = mcp_app
+
+
+class MCPPathCompatibilityMiddleware:
+    """Accept Claude's /mcp normalization without breaking existing /mcp/ clients."""
+
+    aliases = {
+        "/mcp/": "/mcp",
+        "/.well-known/oauth-protected-resource/mcp/": "/.well-known/oauth-protected-resource/mcp",
+    }
+
+    def __init__(self, wrapped_app: ASGIApp):
+        self.wrapped_app = wrapped_app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["path"] in self.aliases:
+            scope = dict(scope)
+            scope["path"] = self.aliases[scope["path"]]
+            scope["raw_path"] = scope["path"].encode("ascii")
+        await self.wrapped_app(scope, receive, send)
+
+
+app = MCPPathCompatibilityMiddleware(mcp_app)
 
 
 if __name__ == "__main__":

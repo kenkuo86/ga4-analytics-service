@@ -2,7 +2,7 @@
 
 這個 PoC 將既有 GA4 Analytics Service 同時暴露為：
 
-- MCP Streamable HTTP endpoint：`/mcp/`
+- MCP Streamable HTTP endpoint：`/mcp`（同時保留 `/mcp/` 相容路由）
 - REST endpoint：`/traffic-summary`
 
 目前唯一的 analytics tool 是 `traffic_summary`。它保留既有的 tenant routing、固定 SQL 與 BigQuery Service Account 權限邊界；LLM 不會直接產生或執行任意 SQL。
@@ -42,7 +42,7 @@ Google token 只用來驗證登入者。本服務不接受 Google access token �
 
 Claude Custom Connector 使用預先註冊的 confidential client：
 
-- Connector URL：`https://ga4-analytics-service-398991472921.asia-east1.run.app/mcp/`
+- Connector URL：`https://ga4-analytics-service-398991472921.asia-east1.run.app/mcp`
 - Callback URL：`https://claude.ai/api/mcp/auth_callback`
 - Scope：`ga4:read`
 - Dynamic Client Registration：停用

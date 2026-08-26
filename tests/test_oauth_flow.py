@@ -13,7 +13,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 SERVICE_ORIGIN = "https://ga4-analytics-service-398991472921.asia-east1.run.app"
-RESOURCE_URL = f"{SERVICE_ORIGIN}/mcp/"
+RESOURCE_URL = f"{SERVICE_ORIGIN}/mcp"
+LEGACY_RESOURCE_URL = f"{RESOURCE_URL}/"
 CLAUDE_REDIRECT = "https://claude.ai/api/mcp/auth_callback"
 HOST = "ga4-analytics-service-398991472921.asia-east1.run.app"
 
@@ -95,6 +96,7 @@ class OAuthFlowTests(unittest.TestCase):
             "resource": RESOURCE_URL,
         }
         params.update(overrides)
+        params = {key: value for key, value in params.items() if value is not None}
         return self.client.get("/authorize", params=params, headers=self.headers, follow_redirects=False)
 
     def _authorize_and_consent(self) -> str:
@@ -155,6 +157,11 @@ class OAuthFlowTests(unittest.TestCase):
         self.assertEqual(protected.status_code, 200)
         self.assertEqual(protected.json()["resource"], RESOURCE_URL)
 
+        canonical_protected = self.client.get(
+            "/.well-known/oauth-protected-resource/mcp", headers=self.headers
+        )
+        self.assertEqual(canonical_protected.status_code, 200)
+
         jwks = self.client.get("/.well-known/jwks.json", headers=self.headers)
         self.assertEqual(jwks.status_code, 200)
         self.assertEqual(jwks.json()["keys"][0]["alg"], "RS256")
@@ -162,6 +169,9 @@ class OAuthFlowTests(unittest.TestCase):
         mcp = self.client.post("/mcp/", headers=self.headers, json={})
         self.assertEqual(mcp.status_code, 401)
         self.assertIn("resource_metadata=", mcp.headers["www-authenticate"])
+
+        canonical_mcp = self.client.post("/mcp", headers=self.headers, json={})
+        self.assertEqual(canonical_mcp.status_code, 401)
 
         rest = self.client.get("/traffic-summary", headers=self.headers)
         self.assertEqual(rest.status_code, 401)
@@ -173,7 +183,7 @@ class OAuthFlowTests(unittest.TestCase):
         tokens = token_response.json()
 
         access = self.client.post(
-            "/mcp/",
+            "/mcp",
             headers={
                 **self.headers,
                 "authorization": f"Bearer {tokens['access_token']}",
@@ -198,13 +208,13 @@ class OAuthFlowTests(unittest.TestCase):
             "mcp-session-id": access.headers["mcp-session-id"],
         }
         initialized = self.client.post(
-            "/mcp/",
+            "/mcp",
             headers=session_headers,
             json={"jsonrpc": "2.0", "method": "notifications/initialized"},
         )
         self.assertEqual(initialized.status_code, 202, initialized.text)
         tools = self.client.post(
-            "/mcp/",
+            "/mcp",
             headers=session_headers,
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
@@ -250,6 +260,14 @@ class OAuthFlowTests(unittest.TestCase):
         self.assertEqual(reused_refresh.json()["error"], "invalid_grant")
 
     def test_wrong_resource_redirect_and_wrong_callback_rejected(self):
+        missing_resource = self._begin_authorization(resource=None)
+        self.assertEqual(missing_resource.status_code, 302)
+        self.assertEqual(urlparse(missing_resource.headers["location"]).netloc, "accounts.google.com")
+
+        trailing_slash_resource = self._begin_authorization(resource=LEGACY_RESOURCE_URL)
+        self.assertEqual(trailing_slash_resource.status_code, 302)
+        self.assertEqual(urlparse(trailing_slash_resource.headers["location"]).netloc, "accounts.google.com")
+
         bad_resource = self._begin_authorization(resource="https://attacker.example/mcp/")
         self.assertEqual(bad_resource.status_code, 302)
         self.assertEqual(parse_qs(urlparse(bad_resource.headers["location"]).query)["error"], ["invalid_target"])

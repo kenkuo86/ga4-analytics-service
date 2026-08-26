@@ -155,7 +155,12 @@ class GoogleOAuthAuthorizationServer(
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
         self._cleanup()
-        if params.resource != self.config.resource_url:
+        # Claude Web can omit the RFC 8707 resource parameter when it falls
+        # back to authorization-server discovery. This server has exactly one
+        # protected resource, so safely default an omitted value to it. Accept
+        # the historical trailing-slash spelling as the same local resource.
+        requested_resource = str(params.resource).rstrip("/") if params.resource else self.config.resource_url
+        if requested_resource != self.config.resource_url:
             raise AuthorizeError("invalid_target", "The requested resource is not this MCP server.")
 
         scopes = tuple(params.scopes or [self.config.required_scope])
@@ -175,7 +180,7 @@ class GoogleOAuthAuthorizationServer(
             code_challenge=params.code_challenge,
             redirect_uri=str(params.redirect_uri),
             redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
-            resource=params.resource,
+            resource=self.config.resource_url,
             google_nonce=nonce,
             expires_at=time.time() + self.config.login_state_ttl_seconds,
         )
