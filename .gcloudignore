@@ -1,0 +1,12 @@
+.gcloudignore
+.git
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+client_secret_*.json
+.env
+.env.*
+!.env.example
+*secret*.json

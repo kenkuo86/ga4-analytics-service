@@ -1,0 +1,5 @@
+google-cloud-bigquery
+fastapi
+uvicorn
+mcp[cli]
+PyJWT[crypto]>=2.10,<3
