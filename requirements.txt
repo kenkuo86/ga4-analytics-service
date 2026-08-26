@@ -1,5 +1,7 @@
 google-cloud-bigquery
 fastapi
 uvicorn
-mcp[cli]
+mcp[cli]==2.1.0
 PyJWT[crypto]>=2.10,<3
+python-multipart>=0.0.20,<1
+requests>=2.32,<3

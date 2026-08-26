@@ -10,3 +10,4 @@ client_secret_*.json
 .env.*
 !.env.example
 *secret*.json
+tests/

@@ -1,27 +1,56 @@
 import uvicorn
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server import MCPServer
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from main import app as api_app
 from main import get_traffic_summary
-from oauth_auth import oauth_config, oauth_token_verifier
+from oauth_auth import oauth_runtime
+from oauth_server import jwks_response
 
 from mcp.server.transport_security import TransportSecuritySettings
 
 mcp_auth_kwargs = {}
-if oauth_config is not None:
+if oauth_runtime.config is not None and oauth_runtime.provider is not None:
+    oauth_config = oauth_runtime.config
     mcp_auth_kwargs = {
-        "token_verifier": oauth_token_verifier,
+        "auth_server_provider": oauth_runtime.provider,
         "auth": AuthSettings(
-            # Pass strings so AuthSettings can preserve the issuer's exact
-            # trailing-slash semantics for RFC 8414 issuer comparison.
             issuer_url=oauth_config.issuer_url,
             resource_server_url=oauth_config.resource_url,
-            required_scopes=list(oauth_config.required_scopes),
+            required_scopes=[oauth_config.required_scope],
+            client_registration_options=ClientRegistrationOptions(
+                enabled=False,
+                valid_scopes=[oauth_config.required_scope],
+                default_scopes=[oauth_config.required_scope],
+            ),
+            revocation_options=RevocationOptions(enabled=True),
         ),
     }
 
 mcp = MCPServer("GA4 Analytics Service", **mcp_auth_kwargs)
+
+
+if oauth_runtime.provider is not None:
+    oauth_provider = oauth_runtime.provider
+
+    @mcp.custom_route("/oauth/google/callback", methods=["GET"])
+    async def google_oauth_callback(request: Request):
+        return await oauth_provider.google_callback(request)
+
+    @mcp.custom_route("/oauth/consent", methods=["POST"])
+    async def oauth_consent(request: Request):
+        return await oauth_provider.consent(request)
+
+    @mcp.custom_route("/.well-known/jwks.json", methods=["GET"])
+    async def oauth_jwks(request: Request):
+        return jwks_response(oauth_provider)
+
+
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(request: Request):
+    return JSONResponse({"status": "ok"})
 
 
 @mcp.tool()
