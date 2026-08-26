@@ -132,22 +132,17 @@ class OAuthFlowTests(unittest.TestCase):
         return query["code"][0]
 
     def _exchange_code(self, code: str, **overrides):
-        client_secret = overrides.pop("client_secret", "test-client-secret-at-least-32-chars")
         data = {
             "grant_type": "authorization_code",
             "client_id": "claude-web-test",
+            "client_secret": "test-client-secret-at-least-32-chars",
             "code": code,
             "redirect_uri": CLAUDE_REDIRECT,
             "code_verifier": self.code_verifier,
             "resource": RESOURCE_URL,
         }
         data.update(overrides)
-        return self.client.post(
-            "/token",
-            data=data,
-            headers=self.headers,
-            auth=("claude-web-test", client_secret),
-        )
+        return self.client.post("/token", data=data, headers=self.headers)
 
     def test_discovery_and_unauthenticated_endpoints(self):
         health = self.client.get("/health", headers=self.headers)
@@ -243,10 +238,10 @@ class OAuthFlowTests(unittest.TestCase):
         refresh = self.client.post(
             "/token",
             headers=self.headers,
-            auth=("claude-web-test", "test-client-secret-at-least-32-chars"),
             data={
                 "grant_type": "refresh_token",
                 "client_id": "claude-web-test",
+                "client_secret": "test-client-secret-at-least-32-chars",
                 "refresh_token": tokens["refresh_token"],
                 "scope": "ga4:read",
                 "resource": RESOURCE_URL,
@@ -258,10 +253,10 @@ class OAuthFlowTests(unittest.TestCase):
         reused_refresh = self.client.post(
             "/token",
             headers=self.headers,
-            auth=("claude-web-test", "test-client-secret-at-least-32-chars"),
             data={
                 "grant_type": "refresh_token",
                 "client_id": "claude-web-test",
+                "client_secret": "test-client-secret-at-least-32-chars",
                 "refresh_token": tokens["refresh_token"],
             },
         )

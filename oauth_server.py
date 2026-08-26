@@ -140,9 +140,7 @@ class GoogleOAuthAuthorizationServer(
             response_types=["code"],
             grant_types=["authorization_code", "refresh_token"],
             scope=config.required_scope,
-            # Claude custom connectors authenticate confidential clients at
-            # the token endpoint with HTTP Basic credentials.
-            token_endpoint_auth_method="client_secret_basic",
+            token_endpoint_auth_method="client_secret_post",
         )
         self._pending_logins: dict[str, PendingAuthorization] = {}
         self._pending_consents: dict[str, PendingConsent] = {}
