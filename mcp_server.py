@@ -1,3 +1,5 @@
+import json
+
 import uvicorn
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server import MCPServer
@@ -91,6 +93,47 @@ mcp_app = mcp.streamable_http_app(
 mcp_app.mount("/", api_app)
 
 
+class OAuthPublicClientMetadataMiddleware:
+    """Correct MCP 2.1.0 metadata for the pre-registered public client."""
+
+    metadata_path = "/.well-known/oauth-authorization-server"
+
+    def __init__(self, wrapped_app: ASGIApp):
+        self.wrapped_app = wrapped_app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] != self.metadata_path:
+            await self.wrapped_app(scope, receive, send)
+            return
+
+        response_start = None
+        response_body = bytearray()
+
+        async def capture(message):
+            nonlocal response_start
+            if message["type"] == "http.response.start":
+                response_start = message
+            elif message["type"] == "http.response.body":
+                response_body.extend(message.get("body", b""))
+                if not message.get("more_body", False):
+                    metadata = json.loads(response_body)
+                    metadata["token_endpoint_auth_methods_supported"] = ["none"]
+                    if "revocation_endpoint_auth_methods_supported" in metadata:
+                        metadata["revocation_endpoint_auth_methods_supported"] = ["none"]
+                    body = json.dumps(metadata, separators=(",", ":")).encode()
+                    assert response_start is not None
+                    headers = [
+                        (name, value)
+                        for name, value in response_start["headers"]
+                        if name.lower() != b"content-length"
+                    ]
+                    headers.append((b"content-length", str(len(body)).encode()))
+                    await send({**response_start, "headers": headers})
+                    await send({"type": "http.response.body", "body": body})
+
+        await self.wrapped_app(scope, receive, capture)
+
+
 class MCPPathCompatibilityMiddleware:
     """Accept Claude's /mcp normalization without breaking existing /mcp/ clients."""
 
@@ -110,7 +153,7 @@ class MCPPathCompatibilityMiddleware:
         await self.wrapped_app(scope, receive, send)
 
 
-app = MCPPathCompatibilityMiddleware(mcp_app)
+app = MCPPathCompatibilityMiddleware(OAuthPublicClientMetadataMiddleware(mcp_app))
 
 
 if __name__ == "__main__":

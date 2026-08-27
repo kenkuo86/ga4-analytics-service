@@ -35,7 +35,6 @@ os.environ.update(
         "MCP_PUBLIC_URL": RESOURCE_URL,
         "OAUTH_ALLOWED_EMAILS": "owner@example.com",
         "MCP_OAUTH_CLIENT_ID": "claude-web-test",
-        "MCP_OAUTH_CLIENT_SECRET": "test-client-secret-at-least-32-chars",
         "GOOGLE_OAUTH_CLIENT_ID": "google-test-client",
         "GOOGLE_OAUTH_CLIENT_SECRET": "google-test-secret",
         "MCP_TOKEN_SIGNING_PRIVATE_KEY": _private_key_pem(),
@@ -135,7 +134,6 @@ class OAuthFlowTests(unittest.TestCase):
         data = {
             "grant_type": "authorization_code",
             "client_id": "claude-web-test",
-            "client_secret": "test-client-secret-at-least-32-chars",
             "code": code,
             "redirect_uri": CLAUDE_REDIRECT,
             "code_verifier": self.code_verifier,
@@ -156,6 +154,7 @@ class OAuthFlowTests(unittest.TestCase):
         self.assertEqual(body["authorization_endpoint"], f"{SERVICE_ORIGIN}/authorize")
         self.assertNotIn("registration_endpoint", body)
         self.assertIn("S256", body["code_challenge_methods_supported"])
+        self.assertIn("none", body["token_endpoint_auth_methods_supported"])
 
         protected = self.client.get("/.well-known/oauth-protected-resource/mcp/", headers=self.headers)
         self.assertEqual(protected.status_code, 200)
@@ -241,7 +240,6 @@ class OAuthFlowTests(unittest.TestCase):
             data={
                 "grant_type": "refresh_token",
                 "client_id": "claude-web-test",
-                "client_secret": "test-client-secret-at-least-32-chars",
                 "refresh_token": tokens["refresh_token"],
                 "scope": "ga4:read",
                 "resource": RESOURCE_URL,
@@ -256,7 +254,6 @@ class OAuthFlowTests(unittest.TestCase):
             data={
                 "grant_type": "refresh_token",
                 "client_id": "claude-web-test",
-                "client_secret": "test-client-secret-at-least-32-chars",
                 "refresh_token": tokens["refresh_token"],
             },
         )
@@ -300,11 +297,12 @@ class OAuthFlowTests(unittest.TestCase):
         )
         self.assertEqual(replay.status_code, 400)
 
-    def test_wrong_client_secret_and_pkce_rejected(self):
+    def test_wrong_client_and_pkce_rejected(self):
         code = self._authorize_and_consent()
-        wrong_secret = self._exchange_code(code, client_secret="wrong")
-        self.assertEqual(wrong_secret.status_code, 401)
-        self.assertEqual(wrong_secret.json()["error"], "invalid_client")
+
+        wrong_client = self._exchange_code(code, client_id="wrong-client")
+        self.assertEqual(wrong_client.status_code, 401)
+        self.assertEqual(wrong_client.json()["error"], "invalid_client")
 
         wrong_pkce = self._exchange_code(code, code_verifier="x" * 64)
         self.assertEqual(wrong_pkce.status_code, 400)

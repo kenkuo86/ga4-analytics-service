@@ -120,7 +120,7 @@ def _b64url_uint(value: int) -> str:
 class GoogleOAuthAuthorizationServer(
     OAuthAuthorizationServerProvider[AuthorizationCode, MCPRefreshToken, AccessToken]
 ):
-    """Confidential, pre-registered Claude client plus Google user login."""
+    """Public, pre-registered Claude client plus Google user login."""
 
     def __init__(self, config: OAuthConfig, google_identity: GoogleIdentityProvider | None = None):
         self.config = config
@@ -134,13 +134,12 @@ class GoogleOAuthAuthorizationServer(
 
         self._client = OAuthClientInformationFull(
             client_id=config.mcp_client_id,
-            client_secret=config.mcp_client_secret,
             client_name="Claude Web GA4 Connector",
             redirect_uris=[AnyUrl(CLAUDE_CALLBACK_URL)],
             response_types=["code"],
             grant_types=["authorization_code", "refresh_token"],
             scope=config.required_scope,
-            token_endpoint_auth_method="client_secret_post",
+            token_endpoint_auth_method="none",
         )
         self._pending_logins: dict[str, PendingAuthorization] = {}
         self._pending_consents: dict[str, PendingConsent] = {}

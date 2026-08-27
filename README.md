@@ -38,15 +38,17 @@ Claude Web
 
 Google token 只用來驗證登入者。本服務不接受 Google access token 作為 MCP bearer token，也不把 Google token 傳給 BigQuery。
 
-必要設定請參考 [`.env.example`](.env.example)。所有 client secret 與 RSA private key 都必須從部署環境或 Secret Manager 注入，不可 commit 到 Git。
+必要設定請參考 [`.env.example`](.env.example)。Google client secret 與 RSA private key 都必須從部署環境或 Secret Manager 注入，不可 commit 到 Git。
 
-Claude Custom Connector 使用預先註冊的 confidential client：
+Claude Custom Connector 使用預先註冊的 public client：
 
 - Connector URL：`https://ga4-analytics-service-398991472921.asia-east1.run.app/mcp`
 - Callback URL：`https://claude.ai/api/mcp/auth_callback`
 - Scope：`ga4:read`
 - Dynamic Client Registration：停用
 - PKCE：S256
+- Client ID：必填
+- Client Secret：留白
 
 服務同時提供 OAuth Authorization Server Metadata、OAuth Protected Resource Metadata 與 JWKS endpoint，供 MCP client discovery 與 token 驗證使用。
 

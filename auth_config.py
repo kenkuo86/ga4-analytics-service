@@ -34,7 +34,6 @@ class OAuthConfig:
     issuer_url: str
     resource_url: str
     mcp_client_id: str
-    mcp_client_secret: str
     google_client_id: str
     google_client_secret: str
     allowed_emails: frozenset[str]
@@ -79,10 +78,6 @@ class OAuthConfig:
         if "BEGIN PRIVATE KEY" not in signing_private_key and "BEGIN RSA PRIVATE KEY" not in signing_private_key:
             raise RuntimeError("MCP_TOKEN_SIGNING_PRIVATE_KEY must contain a PEM private key.")
 
-        mcp_client_secret = _required_env("MCP_OAUTH_CLIENT_SECRET")
-        if len(mcp_client_secret) < 32:
-            raise RuntimeError("MCP_OAUTH_CLIENT_SECRET must contain at least 32 characters.")
-
         signing_key_id = os.getenv("MCP_TOKEN_SIGNING_KEY_ID", "ga4-mcp-poc-1").strip()
         if not signing_key_id:
             raise RuntimeError("MCP_TOKEN_SIGNING_KEY_ID cannot be empty.")
@@ -91,7 +86,6 @@ class OAuthConfig:
             issuer_url=issuer_url.rstrip("/"),
             resource_url=resource_url,
             mcp_client_id=_required_env("MCP_OAUTH_CLIENT_ID"),
-            mcp_client_secret=mcp_client_secret,
             google_client_id=_required_env("GOOGLE_OAUTH_CLIENT_ID"),
             google_client_secret=_required_env("GOOGLE_OAUTH_CLIENT_SECRET"),
             allowed_emails=allowed_emails,
