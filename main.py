@@ -15,6 +15,23 @@ app = FastAPI()
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
 
 
+class TenantResolutionError(ValueError):
+    """A customer name could not be resolved to one active tenant."""
+
+    def __init__(self, code: str, customer_name: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.customer_name = customer_name
+        self.message = message
+
+    def as_result(self) -> dict:
+        return {
+            "status": self.code,
+            "customer_name": self.customer_name,
+            "message": self.message,
+        }
+
+
 def get_bigquery_client():
     credentials, project = google.auth.default(
         scopes=[
@@ -31,30 +48,73 @@ def get_bigquery_client():
 
 def get_tenant_config(
     client: bigquery.Client,
-    tenant_id: str,
+    customer_name: str,
 ):
     """
-    根據 tenant_id 取得 GA4 BigQuery 的位置。
+    根據 registry 中的正式客戶名稱取得 GA4 BigQuery 的位置。
     """
+
+    row, customer_name = get_tenant_record(client, customer_name)
+    tenant_status = (row.status or "").strip().lower()
+
+    if tenant_status != "active":
+        raise TenantResolutionError(
+            "tenant_inactive",
+            customer_name,
+            f"客戶「{row.tenant_name}」存在，但目前狀態為 {tenant_status or '未設定'}，尚未開放查詢。",
+        )
+
+    if not row.project_id:
+        raise TenantResolutionError(
+            "data_unavailable",
+            customer_name,
+            f"客戶「{row.tenant_name}」存在，但尚未設定 GA4 BigQuery 專案。",
+        )
+
+    # table identifier 無法使用 BigQuery query parameter，
+    # 所以在放進 SQL 前先限制格式。
+    identifier_pattern = r"^[A-Za-z0-9_\-]+$"
+
+    if not re.match(identifier_pattern, row.project_id):
+        raise ValueError("Invalid project_id")
+
+    return {
+        "tenant_id": row.tenant_id,
+        "tenant_name": row.tenant_name,
+        "project_id": row.project_id,
+        "dataset_id": "ga4_mar",
+    }
+
+
+def get_tenant_record(client: bigquery.Client, customer_name: str):
+    """Resolve an exact registered name without requiring analytics access."""
+
+    customer_name = customer_name.strip()
+    if not customer_name:
+        raise TenantResolutionError(
+            "invalid_customer_name",
+            customer_name,
+            "請提供客戶名稱。",
+        )
 
     sql = f"""
     SELECT
       tenant_id,
       tenant_name,
       project_id,
-      primary_dataset_id,
       status
     FROM `{REGISTRY_TABLE}`
-    WHERE tenant_id = @tenant_id
-    LIMIT 1
+    WHERE NORMALIZE_AND_CASEFOLD(TRIM(tenant_name), NFKC)
+      = NORMALIZE_AND_CASEFOLD(@customer_name, NFKC)
+    LIMIT 2
     """
 
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ScalarQueryParameter(
-                "tenant_id",
+                "customer_name",
                 "STRING",
-                tenant_id,
+                customer_name,
             )
         ]
     )
@@ -67,47 +127,41 @@ def get_tenant_config(
     )
 
     if not rows:
-        raise ValueError(
-            f"找不到 tenant_id: {tenant_id}"
+        raise TenantResolutionError(
+            "tenant_not_found",
+            customer_name,
+            f"tenant registry 中不存在客戶「{customer_name}」。",
         )
 
-    row = rows[0]
-
-    if row.status != "active":
-        raise ValueError(
-            f"tenant_id '{tenant_id}' 目前不是 active 狀態。"
+    if len(rows) > 1:
+        raise TenantResolutionError(
+            "ambiguous_tenant",
+            customer_name,
+            f"客戶名稱「{customer_name}」對應到多筆 tenant，請聯絡管理者修正 registry。",
         )
 
-    if not row.project_id:
-        raise ValueError(
-            f"tenant_id '{tenant_id}' 沒有 project_id。"
-        )
+    return rows[0], customer_name
 
-    if not row.primary_dataset_id:
-        raise ValueError(
-            f"tenant_id '{tenant_id}' 沒有 primary_dataset_id。"
-        )
 
-    # table identifier 無法使用 BigQuery query parameter，
-    # 所以在放進 SQL 前先限制格式。
-    identifier_pattern = r"^[A-Za-z0-9_\-]+$"
+def get_customer_status(customer_name: str) -> dict:
+    """Report registry existence independently from GA4 dataset availability."""
 
-    if not re.match(identifier_pattern, row.project_id):
-        raise ValueError("Invalid project_id")
-
-    if not re.match(identifier_pattern, row.primary_dataset_id):
-        raise ValueError("Invalid dataset_id")
-
+    client = get_bigquery_client()
+    row, requested_name = get_tenant_record(client, customer_name)
+    tenant_status = (row.status or "").strip().lower()
+    analytics_available = tenant_status == "active" and bool(row.project_id)
     return {
-        "tenant_id": row.tenant_id,
-        "tenant_name": row.tenant_name,
-        "project_id": row.project_id,
-        "dataset_id": "ga4_mar",
+        "status": "customer_found",
+        "customer_name": row.tenant_name,
+        "requested_name": requested_name,
+        "tenant_status": tenant_status or "unset",
+        "analytics_available": analytics_available,
+        "message": f"客戶「{row.tenant_name}」存在於 tenant registry。",
     }
 
 
 def get_traffic_summary(
-    tenant_id: str,
+    customer_name: str,
     start_date: str,
     end_date: str,
 ):
@@ -115,7 +169,7 @@ def get_traffic_summary(
 
     tenant = get_tenant_config(
         client=client,
-        tenant_id=tenant_id,
+        customer_name=customer_name,
     )
 
     sql_path = (
@@ -148,14 +202,22 @@ def get_traffic_summary(
         ]
     )
 
-    rows = client.query(
-        sql,
-        job_config=job_config,
-    ).result()
+    try:
+        rows = client.query(
+            sql,
+            job_config=job_config,
+        ).result()
+    except Exception as error:
+        raise TenantResolutionError(
+            "data_unavailable",
+            customer_name,
+            f"客戶「{tenant['tenant_name']}」存在於 tenant registry，但目前無法取得 GA4 流量資料。",
+        ) from error
 
     row = next(iter(rows))
 
     return {
+        "status": "ok",
         "tenant": {
             "tenant_id": tenant["tenant_id"],
             "tenant_name": tenant["tenant_name"],
@@ -214,15 +276,21 @@ def get_traffic_summary(
     dependencies=[Depends(require_rest_oauth)],
 )
 def traffic_summary(
-    tenant_id: str,
+    customer_name: str,
     start_date: str,
     end_date: str,
 ):
     try:
         return get_traffic_summary(
-            tenant_id=tenant_id,
+            customer_name=customer_name,
             start_date=start_date,
             end_date=end_date,
+        )
+    except TenantResolutionError as error:
+        status_code = 404 if error.code == "tenant_not_found" else 409
+        raise HTTPException(
+            status_code=status_code,
+            detail=error.as_result(),
         )
     except Exception as e:
         raise HTTPException(
@@ -233,7 +301,7 @@ def traffic_summary(
 
 if __name__ == "__main__":
     result = get_traffic_summary(
-        tenant_id="5",
+        customer_name="維肯媒體部落格",
         start_date="2026-08-17",
         end_date="2026-08-23",
     )

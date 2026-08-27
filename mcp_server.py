@@ -8,7 +8,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from main import app as api_app
-from main import get_traffic_summary
+from main import TenantResolutionError, get_customer_status, get_traffic_summary
 from oauth_auth import oauth_runtime
 from oauth_server import jwks_response
 
@@ -57,22 +57,46 @@ async def health(request: Request):
 
 
 @mcp.tool()
+def customer_lookup(customer_name: str) -> dict:
+    """
+    Check whether an exact customer name exists in the tenant registry.
+
+    Use this tool whenever the user asks whether a customer exists. This lookup
+    does not require access to the customer's GA4 dataset. A customer can exist
+    even when analytics_available is false. If the result is tenant_not_found,
+    do not claim that a similar customer exists and do not guess another name.
+    """
+    try:
+        return get_customer_status(customer_name)
+    except TenantResolutionError as error:
+        return error.as_result()
+
+
+@mcp.tool()
 def traffic_summary(
-    tenant_id: str,
+    customer_name: str,
     start_date: str,
     end_date: str,
 ) -> dict:
     """
-    Get GA4 traffic summary for a tenant and date range.
+    Get GA4 traffic summary by the customer's registered name and date range.
 
     Returns current period, previous period, and percentage change for:
     total sessions, total users, new users, and returning users.
+
+    Always use the customer name stated by the user. If the result status is
+    tenant_not_found, tell the user that the customer does not exist in the
+    tenant registry. If it is tenant_inactive, explain that the customer exists
+    but is not currently available. Never guess a different customer.
     """
-    return get_traffic_summary(
-        tenant_id=tenant_id,
-        start_date=start_date,
-        end_date=end_date,
-    )
+    try:
+        return get_traffic_summary(
+            customer_name=customer_name,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except TenantResolutionError as error:
+        return error.as_result()
 
 
 security = TransportSecuritySettings(

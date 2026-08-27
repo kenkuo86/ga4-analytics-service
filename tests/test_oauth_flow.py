@@ -222,7 +222,11 @@ class OAuthFlowTests(unittest.TestCase):
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
         self.assertEqual(tools.status_code, 200, tools.text)
-        self.assertEqual([tool["name"] for tool in tools.json()["result"]["tools"]], ["traffic_summary"])
+        listed_tools = tools.json()["result"]["tools"]
+        self.assertEqual([tool["name"] for tool in listed_tools], ["customer_lookup", "traffic_summary"])
+        traffic_schema = next(tool for tool in listed_tools if tool["name"] == "traffic_summary")["inputSchema"]
+        self.assertIn("customer_name", traffic_schema["properties"])
+        self.assertNotIn("tenant_id", traffic_schema["properties"])
 
         authorized_rest = self.client.get(
             "/traffic-summary",

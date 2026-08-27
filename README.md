@@ -5,7 +5,15 @@
 - MCP Streamable HTTP endpoint：`/mcp`（同時保留 `/mcp/` 相容路由）
 - REST endpoint：`/traffic-summary`
 
-目前唯一的 analytics tool 是 `traffic_summary`。它保留既有的 tenant routing、固定 SQL 與 BigQuery Service Account 權限邊界；LLM 不會直接產生或執行任意 SQL。
+服務提供 `customer_lookup` 與 `traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部 `tenant_id`。`customer_lookup` 只確認 registry 狀態，不依賴客戶 GA4 dataset 權限；`traffic_summary` 保留固定 SQL 與 BigQuery Service Account 權限邊界。LLM 不會直接產生或執行任意 SQL。
+
+例如：
+
+```text
+告訴我維肯媒體部落格上週的流量摘要。
+```
+
+名稱解析會忽略前後空白、英文大小寫與 Unicode 相容字元差異，但不會模糊猜測其他客戶。找不到、尚未 active 或名稱重複時，tool 會回傳明確的結構化狀態。
 
 ## Authentication modes
 
@@ -51,6 +59,8 @@ Claude Custom Connector 使用預先註冊的 public client：
 - Client Secret：留白
 
 服務同時提供 OAuth Authorization Server Metadata、OAuth Protected Resource Metadata 與 JWKS endpoint，供 MCP client discovery 與 token 驗證使用。
+
+後續的跨專案 BigQuery 授權自動化與能力邊界規劃請見 [`ROADMAP.md`](ROADMAP.md)。
 
 ## PoC security boundary
 
