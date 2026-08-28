@@ -156,7 +156,55 @@ def get_customer_status(customer_name: str) -> dict:
         "requested_name": requested_name,
         "tenant_status": tenant_status or "unset",
         "analytics_available": analytics_available,
+        "data_source": (
+            {
+                "project_id": row.project_id,
+                "dataset_id": "ga4_mar",
+            }
+            if row.project_id
+            else None
+        ),
         "message": f"客戶「{row.tenant_name}」存在於 tenant registry。",
+    }
+
+
+def get_available_customers() -> dict:
+    """List uniquely named active customers with configured GA4 projects."""
+
+    client = get_bigquery_client()
+    sql = f"""
+    WITH named_tenants AS (
+      SELECT
+        tenant_name,
+        project_id,
+        status,
+        NORMALIZE_AND_CASEFOLD(TRIM(tenant_name), NFKC) AS normalized_name
+      FROM `{REGISTRY_TABLE}`
+      WHERE NULLIF(TRIM(tenant_name), '') IS NOT NULL
+    ),
+    uniquely_named AS (
+      SELECT normalized_name
+      FROM named_tenants
+      GROUP BY normalized_name
+      HAVING COUNT(*) = 1
+    )
+    SELECT tenant_name
+    FROM named_tenants
+    INNER JOIN uniquely_named USING (normalized_name)
+    WHERE LOWER(TRIM(status)) = 'active'
+      AND NULLIF(TRIM(project_id), '') IS NOT NULL
+    ORDER BY normalized_name
+    """
+
+    rows = list(client.query(sql).result())
+    customer_names = [row.tenant_name for row in rows]
+    return {
+        "status": "ok",
+        "count": len(customer_names),
+        "customers": customer_names,
+        "availability_basis": (
+            "active tenant with a non-empty, unique tenant_name and configured project_id"
+        ),
     }
 
 
@@ -221,6 +269,10 @@ def get_traffic_summary(
         "tenant": {
             "tenant_id": tenant["tenant_id"],
             "tenant_name": tenant["tenant_name"],
+        },
+        "data_source": {
+            "project_id": tenant["project_id"],
+            "dataset_id": tenant["dataset_id"],
         },
         "period": {
             "start_date": row.start_date.isoformat(),

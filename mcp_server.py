@@ -8,7 +8,12 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from main import app as api_app
-from main import TenantResolutionError, get_customer_status, get_traffic_summary
+from main import (
+    TenantResolutionError,
+    get_available_customers,
+    get_customer_status,
+    get_traffic_summary,
+)
 from oauth_auth import oauth_runtime
 from oauth_server import jwks_response
 
@@ -32,7 +37,31 @@ if oauth_runtime.config is not None and oauth_runtime.provider is not None:
         ),
     }
 
-mcp = MCPServer("GA4 Analytics Service", **mcp_auth_kwargs)
+mcp = MCPServer(
+    "GA4 Analytics Service",
+    instructions="""
+This server resolves every customer name through the tenant registry. Users
+never need to know or provide tenant_id, project_id, or dataset_id. Use the
+customer name from the conversation in each tool call; tool results include
+data_source routing metadata when it is configured. Treat tenant_id,
+project_id, and dataset_id as internal metadata and do not show them in the
+answer unless the user explicitly asks for technical routing details.
+
+The only analytics capability currently available is traffic_summary: total
+sessions, total users, new users, returning users, and previous-period change.
+When the user asks which customers are available, call
+list_available_customers and present its customer names. Do not replace the
+customer list with a registry spreadsheet link.
+
+Do not claim that this server can query source, medium, campaign, revenue,
+orders, ads, SEO keywords, CRM, or arbitrary BigQuery data. If the user asks
+for an unsupported follow-up, explain that the current connector does not
+provide it. Never ask the user for a project ID or dataset ID to work around a
+missing capability, and never present general knowledge or an inference as
+actual customer data.
+""".strip(),
+    **mcp_auth_kwargs,
+)
 
 
 if oauth_runtime.provider is not None:
@@ -65,11 +94,34 @@ def customer_lookup(customer_name: str) -> dict:
     does not require access to the customer's GA4 dataset. A customer can exist
     even when analytics_available is false. If the result is tenant_not_found,
     do not claim that a similar customer exists and do not guess another name.
+    When configured, data_source contains the project_id and dataset_id for
+    internal routing. Never ask the user to provide either identifier.
     """
     try:
         return get_customer_status(customer_name)
     except TenantResolutionError as error:
         return error.as_result()
+
+
+@mcp.tool()
+def list_available_customers() -> dict:
+    """
+    List customer names currently available for GA4 traffic summary queries.
+
+    Use this tool when the user asks which customers or accounts can be
+    queried. It returns only registry entries that are active, have a
+    configured project, have a non-empty customer name, and can be uniquely
+    resolved by that name. Present the customer names directly. Do not expose
+    tenant IDs or project IDs, and do not ask the user to inspect the registry
+    spreadsheet instead.
+    """
+    try:
+        return get_available_customers()
+    except Exception:
+        return {
+            "status": "data_unavailable",
+            "message": "目前無法取得可查詢的客戶清單，請稍後再試。",
+        }
 
 
 @mcp.tool()
@@ -87,7 +139,11 @@ def traffic_summary(
     Always use the customer name stated by the user. If the result status is
     tenant_not_found, tell the user that the customer does not exist in the
     tenant registry. If it is tenant_inactive, explain that the customer exists
-    but is not currently available. Never guess a different customer.
+    but is not currently available. Never guess a different customer. The
+    result includes data_source routing metadata; retain it as context and
+    never ask the user for project_id or dataset_id. Do not offer source,
+    medium, campaign, or arbitrary BigQuery queries because this server does
+    not currently provide those capabilities.
     """
     try:
         return get_traffic_summary(

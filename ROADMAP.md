@@ -36,3 +36,13 @@
 5. 為能力邊界與錯誤狀態建立端到端測試。
 
 MCP server 可以保證不提供邊界外的資料，但 host model 的自然語言行為仍需透過清楚的 tool description、connector instructions 與驗收測試共同約束。
+
+目前 server instructions 已要求 host model 不得向使用者索取 `tenant_id`、
+`project_id` 或 `dataset_id`，且 lookup 與 traffic summary 結果會附上 registry
+解析出的 data source routing metadata。新增 source／medium／campaign 等分析時，
+應建立同樣以 `customer_name` 為輸入的固定能力 tool，由 server 內部解析 routing；
+不應讓使用者提供 project，或開放 host model 執行任意 SQL。
+
+`list_available_customers` 會直接列出具有非空白且唯一 `tenant_name`、狀態為
+`active`、並已設定 `project_id` 的 registry 項目。對話介面預設回覆此客戶名稱
+清單，不以 Google Sheet 連結取代結果；Sheet 僅作為管理來源。

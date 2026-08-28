@@ -5,7 +5,12 @@
 - MCP Streamable HTTP endpoint：`/mcp`（同時保留 `/mcp/` 相容路由）
 - REST endpoint：`/traffic-summary`
 
-服務提供 `customer_lookup` 與 `traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部 `tenant_id`。`customer_lookup` 只確認 registry 狀態，不依賴客戶 GA4 dataset 權限；`traffic_summary` 保留固定 SQL 與 BigQuery Service Account 權限邊界。LLM 不會直接產生或執行任意 SQL。
+服務提供 `customer_lookup`、`list_available_customers` 與
+`traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部
+`tenant_id`。`customer_lookup` 只確認 registry 狀態，不依賴客戶 GA4 dataset
+權限；`list_available_customers` 回傳目前可唯一解析且已設定 GA4 project 的 active
+客戶名稱；`traffic_summary` 保留固定 SQL 與 BigQuery Service Account 權限邊界。
+LLM 不會直接產生或執行任意 SQL。
 
 例如：
 
@@ -14,6 +19,16 @@
 ```
 
 名稱解析會忽略前後空白、英文大小寫與 Unicode 相容字元差異，但不會模糊猜測其他客戶。找不到、尚未 active 或名稱重複時，tool 會回傳明確的結構化狀態。
+
+Tool result 會附上 registry 解析出的 `project_id` 與固定的 `ga4_mar`
+dataset，供 host model 保留為內部 routing context；使用者不需要知道或提供這些
+識別資訊，回覆時也不應主動顯示。目前 analytics capability 仍僅限 traffic summary。對
+source／medium／campaign 或任意 BigQuery 查詢，connector 應明確說明尚未支援，
+不得要求使用者提供 project 或 dataset 來繞過能力邊界。
+
+當使用者詢問「目前有哪些客戶可以查詢」時，connector 應直接呼叫
+`list_available_customers` 並列出客戶名稱。Registry Google Sheet 是管理介面，
+不作為預設回答，以免暴露不必要的內部欄位或讓使用者受 Sheet 分享權限影響。
 
 ## Authentication modes
 

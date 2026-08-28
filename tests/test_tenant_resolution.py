@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
-from main import TenantResolutionError, get_customer_status, get_tenant_config
+from main import (
+    TenantResolutionError,
+    get_available_customers,
+    get_customer_status,
+    get_tenant_config,
+    get_traffic_summary,
+)
 
 
 def _row(**overrides):
@@ -27,6 +34,29 @@ def _client_with_rows(rows):
 
 
 class TenantResolutionTests(unittest.TestCase):
+    def test_available_customers_returns_names_only(self):
+        client = _client_with_rows(
+            [
+                SimpleNamespace(tenant_name="初衣食午股份有限公司"),
+                SimpleNamespace(tenant_name="維肯媒體部落格"),
+            ]
+        )
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = get_available_customers()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(
+            result["customers"],
+            ["初衣食午股份有限公司", "維肯媒體部落格"],
+        )
+        self.assertNotIn("project_id", result)
+        sql = client.query.call_args.args[0]
+        self.assertIn("LOWER(TRIM(status)) = 'active'", sql)
+        self.assertIn("NULLIF(TRIM(project_id), '') IS NOT NULL", sql)
+        self.assertIn("HAVING COUNT(*) = 1", sql)
+
     def test_active_customer_resolves_to_ga4_mar(self):
         client = _client_with_rows([_row()])
 
@@ -82,6 +112,70 @@ class TenantResolutionTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "customer_found")
         self.assertTrue(result["analytics_available"])
+        self.assertEqual(
+            result["data_source"],
+            {
+                "project_id": "other-project",
+                "dataset_id": "ga4_mar",
+            },
+        )
+
+    def test_customer_without_project_has_no_data_source(self):
+        client = _client_with_rows([_row(project_id=None)])
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = get_customer_status("維肯媒體部落格")
+
+        self.assertFalse(result["analytics_available"])
+        self.assertIsNone(result["data_source"])
+
+    def test_traffic_summary_returns_registry_routing_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_row(project_id="customer-project")]
+        summary_job = Mock()
+        summary_job.result.return_value = [
+            SimpleNamespace(
+                start_date=date(2026, 8, 17),
+                end_date=date(2026, 8, 23),
+                previous_start_date=date(2026, 8, 10),
+                previous_end_date=date(2026, 8, 16),
+                current_period={
+                    "total_sessions": 100,
+                    "total_users": 80,
+                    "new_users": 60,
+                    "returning_users": 30,
+                },
+                previous_period={
+                    "total_sessions": 120,
+                    "total_users": 90,
+                    "new_users": 70,
+                    "returning_users": 35,
+                },
+                change_pct={
+                    "total_sessions": -16.67,
+                    "total_users": -11.11,
+                    "new_users": -14.29,
+                    "returning_users": -14.29,
+                },
+            )
+        ]
+        client = Mock()
+        client.query.side_effect = [registry_job, summary_job]
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-08-17",
+                "2026-08-23",
+            )
+
+        self.assertEqual(
+            result["data_source"],
+            {
+                "project_id": "customer-project",
+                "dataset_id": "ga4_mar",
+            },
+        )
 
 
 if __name__ == "__main__":

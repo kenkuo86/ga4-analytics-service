@@ -204,6 +204,10 @@ class OAuthFlowTests(unittest.TestCase):
             },
         )
         self.assertEqual(access.status_code, 200, access.text)
+        server_instructions = access.json()["result"]["instructions"]
+        self.assertIn("never need to know or provide tenant_id", server_instructions)
+        self.assertIn("as internal metadata", server_instructions)
+        self.assertIn("Do not claim that this server can query source", server_instructions)
         session_headers = {
             **self.headers,
             "authorization": f"Bearer {tokens['access_token']}",
@@ -223,10 +227,21 @@ class OAuthFlowTests(unittest.TestCase):
         )
         self.assertEqual(tools.status_code, 200, tools.text)
         listed_tools = tools.json()["result"]["tools"]
-        self.assertEqual([tool["name"] for tool in listed_tools], ["customer_lookup", "traffic_summary"])
+        self.assertEqual(
+            [tool["name"] for tool in listed_tools],
+            ["customer_lookup", "list_available_customers", "traffic_summary"],
+        )
+        customer_list_schema = next(
+            tool for tool in listed_tools if tool["name"] == "list_available_customers"
+        )["inputSchema"]
+        self.assertEqual(customer_list_schema["properties"], {})
         traffic_schema = next(tool for tool in listed_tools if tool["name"] == "traffic_summary")["inputSchema"]
         self.assertIn("customer_name", traffic_schema["properties"])
         self.assertNotIn("tenant_id", traffic_schema["properties"])
+        traffic_description = next(
+            tool for tool in listed_tools if tool["name"] == "traffic_summary"
+        )["description"]
+        self.assertIn("never ask the user for project_id", traffic_description)
 
         authorized_rest = self.client.get(
             "/traffic-summary",
