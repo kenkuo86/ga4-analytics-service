@@ -20,6 +20,7 @@ def _row(**overrides):
         "tenant_name": "維肯媒體部落格",
         "project_id": "my-ga4-project",
         "status": "active",
+        "ec": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -65,10 +66,27 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertEqual(tenant["tenant_id"], "5")
         self.assertEqual(tenant["project_id"], "my-ga4-project")
         self.assertEqual(tenant["dataset_id"], "ga4_mar")
+        self.assertEqual(tenant["semantic_profile"], "non_ecommerce")
         _, kwargs = client.query.call_args
         parameter = kwargs["job_config"].query_parameters[0]
         self.assertEqual(parameter.name, "customer_name")
         self.assertEqual(parameter.value, "維肯媒體部落格")
+
+    def test_ec_true_resolves_to_ecommerce_profile(self):
+        tenant = get_tenant_config(
+            _client_with_rows([_row(ec=True)]),
+            "維肯媒體部落格",
+        )
+
+        self.assertEqual(tenant["semantic_profile"], "ecommerce")
+
+    def test_blank_ec_retains_non_ecommerce_profile(self):
+        tenant = get_tenant_config(
+            _client_with_rows([_row(ec=None)]),
+            "維肯媒體部落格",
+        )
+
+        self.assertEqual(tenant["semantic_profile"], "non_ecommerce")
 
     def test_unknown_customer_is_not_found(self):
         with self.assertRaises(TenantResolutionError) as raised:
@@ -112,6 +130,7 @@ class TenantResolutionTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "customer_found")
         self.assertTrue(result["analytics_available"])
+        self.assertEqual(result["semantic_profile"], "non_ecommerce")
         self.assertEqual(
             result["data_source"],
             {

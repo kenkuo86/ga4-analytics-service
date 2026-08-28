@@ -13,9 +13,12 @@ from main import (
     get_available_customers,
     get_customer_status,
     get_traffic_summary,
+    query_ga4_semantic_metrics,
+    search_ga4_metric_catalog,
 )
 from oauth_auth import oauth_runtime
 from oauth_server import jwks_response
+from semantic_catalog import SemanticCatalogError
 
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -47,18 +50,26 @@ data_source routing metadata when it is configured. Treat tenant_id,
 project_id, and dataset_id as internal metadata and do not show them in the
 answer unless the user explicitly asks for technical routing details.
 
-The only analytics capability currently available is traffic_summary: total
-sessions, total users, new users, returning users, and previous-period change.
 When the user asks which customers are available, call
 list_available_customers and present its customer names. Do not replace the
 customer list with a registry spreadsheet link.
 
-Do not claim that this server can query source, medium, campaign, revenue,
-orders, ads, SEO keywords, CRM, or arbitrary BigQuery data. If the user asks
-for an unsupported follow-up, explain that the current connector does not
-provide it. Never ask the user for a project ID or dataset ID to work around a
-missing capability, and never present general knowledge or an inference as
-actual customer data.
+For analytics beyond traffic_summary, first use search_ga4_metrics to find the
+published metric IDs in the versioned semantic catalog, then call query_ga4
+with only those IDs. Catalog metrics may include source, medium, campaign,
+content, conversion, and ecommerce analyses. Never invent a metric ID or SQL.
+query_ga4 resolves ecommerce versus non-ecommerce from the tenant registry ec
+field; never ask the user to identify the site type. Never ask the user for a
+project ID or dataset ID to work around a missing capability.
+
+Each semantic metric result includes date_scope. If it is all_available_data,
+state that the metric definition is an all-data snapshot and do not describe it
+as limited to the requested period.
+
+This server does not provide ads, SEO keyword ranking, CRM, or arbitrary
+BigQuery access. Never present general knowledge or an inference as actual
+customer data, and never claim a catalog metric was queried unless a tool
+returned status ok.
 """.strip(),
     **mcp_auth_kwargs,
 )
@@ -125,6 +136,63 @@ def list_available_customers() -> dict:
 
 
 @mcp.tool()
+def search_ga4_metrics(
+    query: str,
+    profile: str | None = None,
+    limit: int = 10,
+) -> dict:
+    """
+    Search the versioned GA4 semantic catalog for supported metric IDs.
+
+    Use this before query_ga4 whenever the user asks for an analysis beyond the
+    fixed traffic summary or uses a natural-language metric name. The search
+    covers metric labels, report context, and dimensions such as source,
+    medium, campaign, date, device, geography, page, and item. Pass profile as
+    ecommerce or non_ecommerce only when the website type is already known.
+    This tool reads definitions only; it does not query customer data.
+    """
+    try:
+        return search_ga4_metric_catalog(
+            query=query,
+            profile=profile,
+            limit=limit,
+        )
+    except SemanticCatalogError as error:
+        return error.as_result()
+
+
+@mcp.tool()
+def query_ga4(
+    customer_name: str,
+    metric_ids: list[str],
+    start_date: str,
+    end_date: str,
+    limit: int = 50,
+) -> dict:
+    """
+    Query one to five published GA4 semantic metrics for a customer and period.
+
+    metric_ids must come from search_ga4_metrics; never invent IDs. The server
+    resolves project_id, dataset_id, and the ecommerce profile from the tenant
+    registry, compiles only catalog-approved SQL, and never accepts raw table,
+    column, filter, group by, profile, or SQL input. Present only rows returned
+    with status ok and retain routing metadata as internal context. Respect
+    each metric's date_scope: do not describe an all_available_data result as
+    limited to start_date and end_date.
+    """
+    try:
+        return query_ga4_semantic_metrics(
+            customer_name=customer_name,
+            metric_ids=metric_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+    except (TenantResolutionError, SemanticCatalogError) as error:
+        return error.as_result()
+
+
+@mcp.tool()
 def traffic_summary(
     customer_name: str,
     start_date: str,
@@ -141,9 +209,9 @@ def traffic_summary(
     tenant registry. If it is tenant_inactive, explain that the customer exists
     but is not currently available. Never guess a different customer. The
     result includes data_source routing metadata; retain it as context and
-    never ask the user for project_id or dataset_id. Do not offer source,
-    medium, campaign, or arbitrary BigQuery queries because this server does
-    not currently provide those capabilities.
+    never ask the user for project_id or dataset_id. For supported follow-up
+    analyses such as source, medium, or campaign, use search_ga4_metrics and
+    query_ga4 rather than claiming arbitrary BigQuery access.
     """
     try:
         return get_traffic_summary(

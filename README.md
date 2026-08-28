@@ -5,12 +5,12 @@
 - MCP Streamable HTTP endpoint：`/mcp`（同時保留 `/mcp/` 相容路由）
 - REST endpoint：`/traffic-summary`
 
-服務提供 `customer_lookup`、`list_available_customers` 與
-`traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部
+服務提供 `customer_lookup`、`list_available_customers`、`search_ga4_metrics`、
+`query_ga4` 與相容用的 `traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部
 `tenant_id`。`customer_lookup` 只確認 registry 狀態，不依賴客戶 GA4 dataset
 權限；`list_available_customers` 回傳目前可唯一解析且已設定 GA4 project 的 active
-客戶名稱；`traffic_summary` 保留固定 SQL 與 BigQuery Service Account 權限邊界。
-LLM 不會直接產生或執行任意 SQL。
+客戶名稱；`search_ga4_metrics` 搜尋已發布的指標定義；`query_ga4` 依 catalog 中的固定
+SQL 模板查詢一至五個指標。LLM 不會直接產生或執行任意 SQL。
 
 例如：
 
@@ -22,13 +22,58 @@ LLM 不會直接產生或執行任意 SQL。
 
 Tool result 會附上 registry 解析出的 `project_id` 與固定的 `ga4_mar`
 dataset，供 host model 保留為內部 routing context；使用者不需要知道或提供這些
-識別資訊，回覆時也不應主動顯示。目前 analytics capability 仍僅限 traffic summary。對
-source／medium／campaign 或任意 BigQuery 查詢，connector 應明確說明尚未支援，
-不得要求使用者提供 project 或 dataset 來繞過能力邊界。
+識別資訊，回覆時也不應主動顯示。source／medium／campaign 等分析由 semantic
+catalog 決定可用指標與查詢方法；不在 catalog 的問題會回傳 `unsupported_metric`，
+不得要求使用者提供 project、dataset 或 SQL 來繞過能力邊界。
 
 當使用者詢問「目前有哪些客戶可以查詢」時，connector 應直接呼叫
 `list_available_customers` 並列出客戶名稱。Registry Google Sheet 是管理介面，
 不作為預設回答，以免暴露不必要的內部欄位或讓使用者受 Sheet 分享權限影響。
+
+## Semantic layer
+
+指標定義的資料流如下：
+
+```text
+指標定義 CSV / Google Sheet
+  -> build_semantic_catalog.py（正規化、衝突與 SQL 安全檢查）
+  -> semantic/catalog.v1.json（Git 版控的發布產物）
+  -> search_ga4_metrics / query_ga4
+  -> tenant registry 路由
+  -> BigQuery ga4_mar
+```
+
+目前 catalog 有 `ecommerce`（電商）與 `non_ecommerce`（非電商）兩個 profile。
+`query_ga4` 會從 `tenant_registry.ec` 自動選擇：只有 `TRUE` 使用 ecommerce，`FALSE`
+或空白使用 non_ecommerce。profile 不開放成 query tool 輸入，避免對話內容覆寫 registry
+設定。`search_ga4_metrics` 仍可選擇 profile 來縮小定義搜尋範圍。
+
+若同一 profile 中同一個 `metric_id` 有多種語意定義，builder 預設會將它標記為
+`conflict`，runtime 不會發布或執行。非電商 `total_users` 已依確認過的 canonical
+policy 統一為 `mar_ga_sessions`、`session_date`、`COUNT(DISTINCT user_pseudo_id)`；該
+resolution 會一併記錄在 catalog，不會靜默選擇版本。
+
+重新產生 catalog：
+
+```bash
+python scripts/build_semantic_catalog.py \
+  --non-ecommerce /path/to/non-ecommerce.csv \
+  --ecommerce /path/to/ecommerce.csv \
+  --output semantic/catalog.v1.json \
+  --catalog-version 1.1.0
+```
+
+發布前，以一個已授權且具有完整 schema 的客戶 dry-run 所有已發布指標：
+
+```bash
+python scripts/validate_semantic_catalog.py --customer-name '客戶正式名稱'
+```
+
+Catalog 只接受 `SELECT`／`WITH` 單一查詢，且只能引用核准的 `ga4_mar` model。
+日期使用 BigQuery parameters，project 與 dataset 由 registry 解析；每次 query 另有結果
+筆數與 `SEMANTIC_MAX_BYTES_BILLED` 上限。`semantic/catalog.v1.json` 是產生物，請勿
+手動修改。若來源定義未使用日期維度，查詢結果會標示
+`date_scope=all_available_data`；對話回覆不得把這類數字描述成指定期間的結果。
 
 ## Authentication modes
 
@@ -96,4 +141,4 @@ Claude Custom Connector 使用預先註冊的 public client：
 python -m unittest discover -s tests -v
 ```
 
-測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list，以及 REST bearer protection；不會連線 BigQuery 或修改任何 GCP 資源。
+測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。

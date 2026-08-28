@@ -1,6 +1,9 @@
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
+import os
 from pathlib import Path
 import re
+from typing import Any
 
 from google.cloud import bigquery
 import google.auth
@@ -8,11 +11,15 @@ import google.auth
 from fastapi import Depends, FastAPI, HTTPException
 
 from oauth_auth import require_rest_oauth
+from semantic_catalog import SemanticCatalogError, semantic_catalog
 
 app = FastAPI()
 
 # 改成你實際存放 tenant_registry 的完整 table ID
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
+SEMANTIC_MAX_BYTES_BILLED = int(
+    os.getenv("SEMANTIC_MAX_BYTES_BILLED", "10000000000")
+)
 
 
 class TenantResolutionError(ValueError):
@@ -83,6 +90,9 @@ def get_tenant_config(
         "tenant_name": row.tenant_name,
         "project_id": row.project_id,
         "dataset_id": "ga4_mar",
+        # Registry policy: only literal TRUE means ecommerce. FALSE and blank
+        # retain the non-ecommerce behavior used before the column existed.
+        "semantic_profile": "ecommerce" if row.ec is True else "non_ecommerce",
     }
 
 
@@ -102,7 +112,8 @@ def get_tenant_record(client: bigquery.Client, customer_name: str):
       tenant_id,
       tenant_name,
       project_id,
-      status
+      status,
+      ec
     FROM `{REGISTRY_TABLE}`
     WHERE NORMALIZE_AND_CASEFOLD(TRIM(tenant_name), NFKC)
       = NORMALIZE_AND_CASEFOLD(@customer_name, NFKC)
@@ -156,6 +167,7 @@ def get_customer_status(customer_name: str) -> dict:
         "requested_name": requested_name,
         "tenant_status": tenant_status or "unset",
         "analytics_available": analytics_available,
+        "semantic_profile": "ecommerce" if row.ec is True else "non_ecommerce",
         "data_source": (
             {
                 "project_id": row.project_id,
@@ -205,6 +217,192 @@ def get_available_customers() -> dict:
         "availability_basis": (
             "active tenant with a non-empty, unique tenant_name and configured project_id"
         ),
+    }
+
+
+def search_ga4_metric_catalog(
+    query: str,
+    profile: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Search the published semantic metric catalog without querying tenant data."""
+
+    return semantic_catalog.search(
+        query=query,
+        profile=profile,
+        limit=limit,
+    )
+
+
+def _validated_date_range(start_date: str, end_date: str) -> tuple[date, date]:
+    try:
+        parsed_start = date.fromisoformat(start_date)
+        parsed_end = date.fromisoformat(end_date)
+    except ValueError as error:
+        raise SemanticCatalogError(
+            "invalid_date_range",
+            "日期必須使用 YYYY-MM-DD 格式。",
+        ) from error
+    if parsed_start > parsed_end:
+        raise SemanticCatalogError(
+            "invalid_date_range",
+            "start_date 不得晚於 end_date。",
+        )
+    if (parsed_end - parsed_start).days + 1 > 366:
+        raise SemanticCatalogError(
+            "date_range_too_large",
+            "單次 semantic query 最多查詢 366 天。",
+        )
+    return parsed_start, parsed_end
+
+
+def _serialize_bigquery_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {
+            str(key): _serialize_bigquery_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_serialize_bigquery_value(item) for item in value]
+    if hasattr(value, "items"):
+        return {
+            str(key): _serialize_bigquery_value(item)
+            for key, item in value.items()
+        }
+    return str(value)
+
+
+def query_ga4_semantic_metrics(
+    customer_name: str,
+    metric_ids: list[str],
+    start_date: str,
+    end_date: str,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Execute catalog-approved metric SQL for one resolved tenant."""
+
+    if not isinstance(metric_ids, list) or not metric_ids:
+        raise SemanticCatalogError(
+            "invalid_metric_request",
+            "請至少提供一個 metric_id。",
+        )
+    if len(metric_ids) > 5:
+        raise SemanticCatalogError(
+            "too_many_metrics",
+            "單次最多查詢 5 個指標。",
+        )
+    normalized_metric_ids = []
+    for metric_id in metric_ids:
+        if not isinstance(metric_id, str):
+            raise SemanticCatalogError(
+                "invalid_metric_request",
+                "每個 metric_id 都必須是字串。",
+            )
+        normalized = metric_id.strip()
+        if not normalized or not re.fullmatch(r"[a-z0-9_]+", normalized):
+            raise SemanticCatalogError(
+                "invalid_metric_request",
+                f"metric_id「{metric_id}」格式不合法。",
+            )
+        if normalized not in normalized_metric_ids:
+            normalized_metric_ids.append(normalized)
+
+    parsed_start, parsed_end = _validated_date_range(start_date, end_date)
+    result_limit = max(1, min(int(limit), 200))
+    client = get_bigquery_client()
+    tenant = get_tenant_config(client, customer_name)
+    resolved_profile, _ = semantic_catalog.resolve_profile(
+        normalized_metric_ids,
+        tenant["semantic_profile"],
+    )
+    profile_resolution = "tenant_registry.ec"
+    metric_results = []
+    for metric_id in normalized_metric_ids:
+        sql, metric = semantic_catalog.compile_sql(
+            profile=resolved_profile,
+            metric_id=metric_id,
+            project_id=tenant["project_id"],
+            dataset_id=tenant["dataset_id"],
+            result_limit=result_limit,
+        )
+        date_scope = (
+            "requested_period"
+            if "@start_date" in sql and "@end_date" in sql
+            else "all_available_data"
+        )
+        query_parameters = []
+        if "@start_date" in sql:
+            query_parameters.append(
+                bigquery.ScalarQueryParameter("start_date", "DATE", parsed_start)
+            )
+        if "@end_date" in sql:
+            query_parameters.append(
+                bigquery.ScalarQueryParameter("end_date", "DATE", parsed_end)
+            )
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=query_parameters,
+            maximum_bytes_billed=SEMANTIC_MAX_BYTES_BILLED,
+            use_query_cache=True,
+            labels={
+                "component": "semantic",
+                "profile": resolved_profile.replace("_", "-")[:63],
+            },
+        )
+        try:
+            query_job = client.query(sql, job_config=job_config)
+            rows = list(query_job.result())
+        except Exception as error:
+            raise SemanticCatalogError(
+                "data_unavailable",
+                f"客戶「{tenant['tenant_name']}」的指標「{metric_id}」目前無法查詢。",
+                details={"metric_id": metric_id},
+            ) from error
+
+        truncated = len(rows) > result_limit
+        serialized_rows = [
+            _serialize_bigquery_value(dict(row.items()))
+            for row in rows[:result_limit]
+        ]
+        metric_results.append(
+            {
+                "metric_id": metric_id,
+                "label": metric["label"],
+                "main_metric": metric["main_metric"],
+                "category": metric["category"],
+                "dimensions": metric["dimensions"],
+                "date_scope": date_scope,
+                "row_count": len(serialized_rows),
+                "truncated": truncated,
+                "rows": serialized_rows,
+            }
+        )
+
+    return {
+        "status": "ok",
+        "tenant": {
+            "tenant_id": tenant["tenant_id"],
+            "tenant_name": tenant["tenant_name"],
+        },
+        "data_source": {
+            "project_id": tenant["project_id"],
+            "dataset_id": tenant["dataset_id"],
+        },
+        "semantic": {
+            "catalog_version": semantic_catalog.version,
+            "profile": resolved_profile,
+            "profile_resolution": profile_resolution,
+        },
+        "period": {
+            "start_date": parsed_start.isoformat(),
+            "end_date": parsed_end.isoformat(),
+        },
+        "metrics": metric_results,
     }
 
 

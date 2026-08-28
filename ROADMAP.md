@@ -23,25 +23,37 @@
 
 不建議直接在 tenant project 或共同 folder 授予 `roles/bigquery.dataViewer`，除非其中所有 BigQuery datasets 都允許 MCP 讀取，因為 project／folder 層級授權不會只限定名稱為 `ga4_mar` 的 dataset。
 
-## Phase 3: capability boundaries
+## Phase 3: semantic layer and capability boundaries
 
-目前 MCP 只提供 GA4 traffic summary：sessions、total users、new users、returning users，以及前一期比較。
+第一版 semantic layer 已完成：來源指標表會編譯成 Git 版控的
+`semantic/catalog.v1.json`，MCP 透過 `search_ga4_metrics` 搜尋定義，再由
+`query_ga4` 執行 catalog 內的固定 SQL。source／medium／campaign 等維度分析不再需要
+各寫一個 tool；`traffic_summary` 暫時保留為既有相容介面。
 
-後續應：
+已完成的能力邊界：
 
-1. 在 server instructions 與 tool descriptions 明確列出可用資料。
-2. 對未支援的 GA4 指標回傳 `unsupported_metric`。
-3. 對營收、訂單、廣告、SEO keyword、CRM 等非 GA4 traffic summary 問題回傳 `data_unavailable`。
-4. 禁止把一般知識或推測描述成客戶的實際資料。
-5. 為能力邊界與錯誤狀態建立端到端測試。
+1. 在 server instructions 與 tool descriptions 明確要求先搜尋 catalog，禁止虛構 metric ID 或 SQL。
+2. 對未發布的 GA4 指標回傳 `unsupported_metric`，對來源定義衝突回傳 `metric_definition_conflict`。
+3. 只允許 catalog 中的單一 `SELECT`／`WITH` query 與核准 model，不提供任意 SQL tool。
+4. project／dataset 一律由 tenant registry 在服務端解析。
+5. 查詢有日期範圍、結果筆數、每次 metric 數量及 bytes billed 上限。
+6. 對 catalog builder、runtime compiler、profile 判定與 MCP schema 建立測試，並提供全 catalog BigQuery dry-run。
+
+下一步依優先順序：
+
+1. 將 Google Sheet 匯出、catalog build、單元測試與 BigQuery dry-run 串成 CI；只有全部通過才允許發布 catalog。
+2. 為來源表增加 schema 驗證規則，包括 metric ID 唯一性、derived metric dependency、時間維度、model grain 與 owner／變更說明。
+3. 視使用情況將重複 SQL 逐步拆成可組合的 base metric、dimension 與 filter definition；在此之前仍以已驗證的固定 SQL template 為執行來源。
+
+2026-08-28 已完成：runtime 讀取 `tenant_registry.ec`，只有 `TRUE` 使用 ecommerce
+profile，`FALSE` 或空白使用 non_ecommerce；非電商 `total_users` 也已統一使用
+`mar_ga_sessions` 與 `session_date`，catalog 提升至 v1.1.0。
 
 MCP server 可以保證不提供邊界外的資料，但 host model 的自然語言行為仍需透過清楚的 tool description、connector instructions 與驗收測試共同約束。
 
 目前 server instructions 已要求 host model 不得向使用者索取 `tenant_id`、
-`project_id` 或 `dataset_id`，且 lookup 與 traffic summary 結果會附上 registry
-解析出的 data source routing metadata。新增 source／medium／campaign 等分析時，
-應建立同樣以 `customer_name` 為輸入的固定能力 tool，由 server 內部解析 routing；
-不應讓使用者提供 project，或開放 host model 執行任意 SQL。
+`project_id` 或 `dataset_id`，且所有查詢都由 server 內部解析 routing。新增指標時應更新
+定義表、重新產生 catalog 並通過驗證，不需要新增一組 MCP tool。
 
 `list_available_customers` 會直接列出具有非空白且唯一 `tenant_name`、狀態為
 `active`、並已設定 `project_id` 的 registry 項目。對話介面預設回覆此客戶名稱

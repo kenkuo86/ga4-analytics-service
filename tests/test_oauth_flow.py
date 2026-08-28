@@ -207,7 +207,7 @@ class OAuthFlowTests(unittest.TestCase):
         server_instructions = access.json()["result"]["instructions"]
         self.assertIn("never need to know or provide tenant_id", server_instructions)
         self.assertIn("as internal metadata", server_instructions)
-        self.assertIn("Do not claim that this server can query source", server_instructions)
+        self.assertIn("Never invent a metric ID or SQL", server_instructions)
         session_headers = {
             **self.headers,
             "authorization": f"Bearer {tokens['access_token']}",
@@ -229,12 +229,29 @@ class OAuthFlowTests(unittest.TestCase):
         listed_tools = tools.json()["result"]["tools"]
         self.assertEqual(
             [tool["name"] for tool in listed_tools],
-            ["customer_lookup", "list_available_customers", "traffic_summary"],
+            [
+                "customer_lookup",
+                "list_available_customers",
+                "search_ga4_metrics",
+                "query_ga4",
+                "traffic_summary",
+            ],
         )
         customer_list_schema = next(
             tool for tool in listed_tools if tool["name"] == "list_available_customers"
         )["inputSchema"]
         self.assertEqual(customer_list_schema["properties"], {})
+        search_schema = next(
+            tool for tool in listed_tools if tool["name"] == "search_ga4_metrics"
+        )["inputSchema"]
+        self.assertIn("query", search_schema["properties"])
+        query_schema = next(
+            tool for tool in listed_tools if tool["name"] == "query_ga4"
+        )["inputSchema"]
+        self.assertIn("metric_ids", query_schema["properties"])
+        self.assertNotIn("project_id", query_schema["properties"])
+        self.assertNotIn("profile", query_schema["properties"])
+        self.assertNotIn("sql", query_schema["properties"])
         traffic_schema = next(tool for tool in listed_tools if tool["name"] == "traffic_summary")["inputSchema"]
         self.assertIn("customer_name", traffic_schema["properties"])
         self.assertNotIn("tenant_id", traffic_schema["properties"])
