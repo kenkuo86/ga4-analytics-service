@@ -40,16 +40,20 @@ class TenantResolutionError(ValueError):
 
 
 def get_bigquery_client():
-    credentials, project = google.auth.default(
+    credentials, detected_project = google.auth.default(
         scopes=[
             "https://www.googleapis.com/auth/cloud-platform",
             "https://www.googleapis.com/auth/drive",
         ]
     )
+    billing_project = (
+        os.getenv("BIGQUERY_BILLING_PROJECT", "").strip()
+        or detected_project
+    )
 
     return bigquery.Client(
         credentials=credentials,
-        project=project,
+        project=billing_project,
     )
 
 

@@ -69,6 +69,29 @@ python scripts/build_semantic_catalog.py \
 python scripts/validate_semantic_catalog.py --customer-name '客戶正式名稱'
 ```
 
+完成跨專案 dataset 授權後，先查詢一次 registry，再以 Cloud Run runtime
+service account 對所有 active tenant dry-run `total_users`：
+
+```bash
+.venv/bin/python scripts/validate_all_tenants.py \
+  --billing-project ga4-reports-dev \
+  --impersonate-service-account 'RUNTIME_SA_EMAIL' \
+  --output /tmp/ga4-tenant-validation.json
+```
+
+若指令已經在 runtime service account 身分下執行，可省略
+`--impersonate-service-account`。每個 tenant 的指標查詢都強制設為 BigQuery
+dry run，不會實際查詢 tenant 資料或產生 dry-run query 費用；只有取得
+active tenant 清單的 registry query 會實際執行一次。若要同時驗證所有已發布
+metric 的 schema，可加上 `--all-published-metrics`。
+若本機 Application Default Credentials 與 `gcloud` 的主動帳號行為不一致，
+可加上 `--use-gcloud-source-credentials`；該模式只在記憶體中將 `gcloud`
+access token 交換為 runtime service account token，不會寫入報告。
+
+Runtime BigQuery client 可透過 `BIGQUERY_BILLING_PROJECT` 明確指定 query job
+與計費專案；PoC 部署設為 `ga4-reports-dev`。該變數未設定或只有空白時，
+程式會維持原有行為，使用 Application Default Credentials 推斷的 project。
+
 Catalog 只接受 `SELECT`／`WITH` 單一查詢，且只能引用核准的 `ga4_mar` model。
 日期使用 BigQuery parameters，project 與 dataset 由 registry 解析；每次 query 另有結果
 筆數與 `SEMANTIC_MAX_BYTES_BILLED` 上限。`semantic/catalog.v1.json` 是產生物，請勿

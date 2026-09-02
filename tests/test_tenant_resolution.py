@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
@@ -8,6 +9,7 @@ from unittest.mock import Mock
 from main import (
     TenantResolutionError,
     get_available_customers,
+    get_bigquery_client,
     get_customer_status,
     get_tenant_config,
     get_traffic_summary,
@@ -35,6 +37,46 @@ def _client_with_rows(rows):
 
 
 class TenantResolutionTests(unittest.TestCase):
+    def test_bigquery_billing_project_override_wins_over_adc_project(self):
+        credentials = Mock()
+        with (
+            unittest.mock.patch(
+                "main.google.auth.default",
+                return_value=(credentials, "detected-project"),
+            ),
+            unittest.mock.patch("main.bigquery.Client") as client_class,
+            unittest.mock.patch.dict(
+                os.environ,
+                {"BIGQUERY_BILLING_PROJECT": "ga4-reports-dev"},
+            ),
+        ):
+            get_bigquery_client()
+
+        client_class.assert_called_once_with(
+            credentials=credentials,
+            project="ga4-reports-dev",
+        )
+
+    def test_blank_billing_project_falls_back_to_adc_project(self):
+        credentials = Mock()
+        with (
+            unittest.mock.patch(
+                "main.google.auth.default",
+                return_value=(credentials, "detected-project"),
+            ),
+            unittest.mock.patch("main.bigquery.Client") as client_class,
+            unittest.mock.patch.dict(
+                os.environ,
+                {"BIGQUERY_BILLING_PROJECT": "   "},
+            ),
+        ):
+            get_bigquery_client()
+
+        client_class.assert_called_once_with(
+            credentials=credentials,
+            project="detected-project",
+        )
+
     def test_available_customers_returns_names_only(self):
         client = _client_with_rows(
             [
