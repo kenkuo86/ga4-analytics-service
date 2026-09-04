@@ -18,6 +18,10 @@
 
 ### Foundation 1: authentication and tenant routing
 
+Status: Done
+
+Dependencies: None
+
 已完成：
 
 1. 支援 `cloud-run-iam` 與 `oauth` 兩種 authentication mode。
@@ -29,6 +33,10 @@
 目前 OAuth state 與 refresh token 仍存放在單一 instance 的 process memory，因此 OAuth 模式暫時維持 Cloud Run `max instances = 1`。多 instance、持久 token、完整撤銷與稽核不在目前 PoC 範圍內。
 
 ### Foundation 2: cross-project BigQuery access
+
+Status: Done
+
+Dependencies: Foundation 1
 
 2026-09-02 已完成首次授權 rollout：在已確認存在 `ga4_mar` 的 tenant projects 中，授予 Cloud Run runtime service account dataset-level `roles/bigquery.dataViewer`，而不是 project／folder 層級權限。
 
@@ -45,6 +53,10 @@
 3. 管理者身分與 runtime service account 持續分離。
 
 ### Foundation 3: semantic layer and basic capability boundary
+
+Status: Done
+
+Dependencies: Foundations 1–2
 
 第一版 semantic layer 已完成：
 
@@ -67,6 +79,10 @@
 以下順序以成本與資料安全優先，再逐步改善可信度及使用體驗。
 
 ### Phase 4: unified query cost controls
+
+Status: Todo
+
+Dependencies: None
 
 #### Goal
 
@@ -95,6 +111,10 @@
 
 ### Phase 5: capability preflight and explicit AI boundaries
 
+Status: Todo
+
+Dependencies: None. Recommended after Phase 4 because both are likely to modify `main.py`, MCP error handling, and query tests.
+
 #### Goal
 
 讓 AI 在執行 BigQuery 前先知道服務能否回答需求；廣告、SEO keyword ranking、CRM 或其他非 GA4 資料需求應直接說明不支援。
@@ -121,6 +141,10 @@
 
 ### Phase 6: query provenance and auditability
 
+Status: Todo
+
+Dependencies: Phase 4
+
 #### Goal
 
 使用者明確要求時，提供當次實際執行的所有指標 SQL 與 BigQuery job metadata，方便自行查核數字與費用。
@@ -141,6 +165,10 @@
 - `include_query=false` 時維持精簡回傳，不增加不必要的 routing 資訊。
 
 ### Phase 7: managed customer aliases and candidate search
+
+Status: Todo
+
+Dependencies: None. Coordinate with Phases 4–6 because tenant resolution and query orchestration share `main.py` and related tests.
 
 #### Goal
 
@@ -171,6 +199,10 @@
 
 ### Phase 8: deterministic traffic summary report contract
 
+Status: Todo
+
+Dependencies: Phase 4
+
 #### Goal
 
 讓 `traffic_summary` 每次都回傳足以產生相同折線圖的資料與呈現規格，避免同一個 tool 有時顯示表格、有時顯示圖表。
@@ -199,6 +231,10 @@
 - Headline totals 與 daily series 可由測試驗證一致。
 
 ### Phase 9: consent page redesign and capability sync
+
+Status: Todo
+
+Dependencies: Phases 5–6
 
 #### Goal
 
