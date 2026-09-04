@@ -21,8 +21,9 @@ dataset-level `roles/bigquery.dataViewer`。這次完成的是首次授權 rollo
 
 1. 2026-09-02 已以 Cloud Run runtime service account 執行 `scripts/validate_all_tenants.py`：實際查詢 registry 一次，再對 54 個 active tenant dry-run `total_users`，54/54 通過、0 次 tenant 實際查詢、0 筆失敗。驗收時使用的暫時 Service Account Token Creator binding 已於完成後移除。
 2. 2026-09-02 已加入並部署最小版 `BIGQUERY_BILLING_PROJECT` optional override：PoC 明確設為 `ga4-reports-dev`，未設定或空白時則保留 ADC project fallback。Cloud Run revision `ga4-analytics-service-billing-project-20260902` 已通過 preview 與正式 `/health` 驗證，目前承接 100% 流量。`roles/bigquery.jobUser` 應維持只授在查詢計費專案。
-3. 建立只讀 IAM audit：從 registry 讀取 active `project_id`、檢查 `<project_id>.ga4_mar` 與 Data Viewer grant，定期輸出 drift 報告。
-4. 將後續新增／停用 tenant 的變更做成「先 plan、後人工核准 apply」的可重複執行管理腳本；管理者身分與 runtime service account 維持分離。
+3. 2026-09-04 已加入最小 PoC 部署腳本：部署前檢查登入與 worktree、執行測試，部署後恢復 `LATEST=100%`、驗證 `/health` 並檢查 ERROR logs；驗證失敗時只顯示 rollback 指令，不自動回滾。Cloud Run 線上 traffic 也已調整為 `latestRevision=true` 且 100% 指向 LATEST。
+4. 建立只讀 IAM audit：從 registry 讀取 active `project_id`、檢查 `<project_id>.ga4_mar` 與 Data Viewer grant，定期輸出 drift 報告。
+5. 將後續新增／停用 tenant 的變更做成「先 plan、後人工核准 apply」的可重複執行管理腳本；管理者身分與 runtime service account 維持分離。
 
 不建議直接在 tenant project 或共同 folder 授予 `roles/bigquery.dataViewer`，除非其中所有 BigQuery datasets 都允許 MCP 讀取，因為 project／folder 層級授權不會只限定名稱為 `ga4_mar` 的 dataset。
 

@@ -92,6 +92,28 @@ Runtime BigQuery client 可透過 `BIGQUERY_BILLING_PROJECT` 明確指定 query 
 與計費專案；PoC 部署設為 `ga4-reports-dev`。該變數未設定或只有空白時，
 程式會維持原有行為，使用 Application Default Credentials 推斷的 project。
 
+## PoC deployment
+
+一般改動使用固定的部署腳本：
+
+```bash
+scripts/deploy_poc.sh
+```
+
+腳本會先檢查 `gcloud` 登入、拒絕未提交的 worktree、執行完整測試，
+再以固定的 project、region、runtime service account 與 billing project 從 source
+部署。新 revision 建立成功後會將流量恢復為 `LATEST=100%`，驗證正式
+`/health` 並檢查新 revision 的 ERROR logs。若驗證失敗，腳本會停止並顯示
+rollback 指令，不會自動回滾。
+
+只在已人工確認差異時，才允許部署 dirty worktree：
+
+```bash
+scripts/deploy_poc.sh --allow-dirty
+```
+
+重大 OAuth／IAM 變更仍應改用 `--no-traffic` 與 revision tag 進行 preview。
+
 Catalog 只接受 `SELECT`／`WITH` 單一查詢，且只能引用核准的 `ga4_mar` model。
 日期使用 BigQuery parameters，project 與 dataset 由 registry 解析；每次 query 另有結果
 筆數與 `SEMANTIC_MAX_BYTES_BILLED` 上限。`semantic/catalog.v1.json` 是產生物，請勿
