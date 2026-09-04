@@ -178,6 +178,12 @@ Claude Custom Connector 使用預先註冊的 public client：
 
 因此 `AUTH_MODE=oauth` 部署時必須先維持 Cloud Run `max instances = 1`。instance restart 會使尚未完成的登入流程與既有 refresh token 失效，使用者需要重新連線。若要多 instance、持久 refresh token、完整撤銷與稽核，應把 authorization server 狀態移到持久 storage，或改用正式的獨立 authorization server。
 
+## Development workflow
+
+後續 ROADMAP Phase 不直接在 `main` 實作。每個 Phase 至少使用一個獨立 branch
+與 Pull Request，並以繁體中文完整記錄改動重點、目標、驗收方式及實際驗收成果。
+完整規則與 PR template 請見 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+
 ## Local verification
 
 安裝依賴後執行：
