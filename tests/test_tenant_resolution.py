@@ -14,6 +14,7 @@ from main import (
     get_tenant_config,
     get_traffic_summary,
 )
+from query_policy import QueryPolicyError
 
 
 def _row(**overrides):
@@ -220,8 +221,9 @@ class TenantResolutionTests(unittest.TestCase):
                 },
             )
         ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
         client = Mock()
-        client.query.side_effect = [registry_job, summary_job]
+        client.query.side_effect = [registry_job, dry_run_job, summary_job]
 
         with unittest.mock.patch("main.get_bigquery_client", return_value=client):
             result = get_traffic_summary(
@@ -237,6 +239,59 @@ class TenantResolutionTests(unittest.TestCase):
                 "dataset_id": "ga4_mar",
             },
         )
+        execution_config = client.query.call_args_list[2].kwargs["job_config"]
+        self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
+        self.assertTrue(execution_config.use_query_cache)
+        self.assertEqual(execution_config.job_timeout_ms, "60000")
+        self.assertEqual(execution_config.labels["component"], "traffic-summary")
+
+    def test_traffic_summary_validates_dates_before_bigquery(self):
+        with (
+            unittest.mock.patch("main.get_bigquery_client") as get_client,
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-01-01",
+                "2026-04-01",
+            )
+
+        self.assertEqual(raised.exception.code, "date_range_too_large")
+        get_client.assert_not_called()
+
+    def test_traffic_summary_comparison_stays_after_earliest_date(self):
+        with (
+            unittest.mock.patch("main.get_bigquery_client") as get_client,
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            get_traffic_summary(
+                "維肯媒體部落格",
+                "2020-10-14",
+                "2020-10-14",
+            )
+
+        self.assertEqual(raised.exception.code, "date_before_available_range")
+        get_client.assert_not_called()
+
+    def test_traffic_summary_cost_limit_blocks_data_execution(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_row(project_id="customer-project")]
+        dry_run_job = SimpleNamespace(total_bytes_processed=2_000_000_001)
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-08-17",
+                "2026-08-23",
+            )
+
+        self.assertEqual(raised.exception.code, "query_cost_limit_exceeded")
+        self.assertEqual(client.query.call_count, 2)
 
 
 if __name__ == "__main__":

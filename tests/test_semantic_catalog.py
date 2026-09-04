@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock
 
 from main import query_ga4_semantic_metrics
+from query_policy import QueryPolicy, QueryPolicyError
 from semantic_catalog import SemanticCatalog, SemanticCatalogError, semantic_catalog
 
 
@@ -142,8 +143,9 @@ class SemanticCatalogTests(unittest.TestCase):
                 "sessions_by_source_medium": 123,
             }
         ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
         client = Mock()
-        client.query.side_effect = [registry_job, metric_job]
+        client.query.side_effect = [registry_job, dry_run_job, metric_job]
 
         with unittest.mock.patch("main.get_bigquery_client", return_value=client):
             result = query_ga4_semantic_metrics(
@@ -170,16 +172,20 @@ class SemanticCatalogTests(unittest.TestCase):
                 "sessions_by_source_medium": 123,
             },
         )
-        semantic_sql = client.query.call_args_list[1].args[0]
+        semantic_sql = client.query.call_args_list[2].args[0]
         self.assertIn("`customer-project.ga4_mar.mar_ga_sessions`", semantic_sql)
+        execution_config = client.query.call_args_list[2].kwargs["job_config"]
+        self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
+        self.assertTrue(execution_config.use_query_cache)
 
     def test_generic_query_uses_ecommerce_profile_from_registry(self):
         registry_job = Mock()
         registry_job.result.return_value = [_tenant_row(ec=True)]
         metric_job = Mock()
         metric_job.result.return_value = [{"total_conversions": 12}]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
         client = Mock()
-        client.query.side_effect = [registry_job, metric_job]
+        client.query.side_effect = [registry_job, dry_run_job, metric_job]
 
         with unittest.mock.patch("main.get_bigquery_client", return_value=client):
             result = query_ga4_semantic_metrics(
@@ -196,7 +202,7 @@ class SemanticCatalogTests(unittest.TestCase):
         )
 
     def test_generic_query_validates_date_range_before_bigquery(self):
-        with self.assertRaises(SemanticCatalogError) as raised:
+        with self.assertRaises(QueryPolicyError) as raised:
             query_ga4_semantic_metrics(
                 customer_name="初衣食午股份有限公司",
                 metric_ids=["total_sessions"],
@@ -205,6 +211,32 @@ class SemanticCatalogTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "invalid_date_range")
+
+    def test_multi_metric_request_limit_blocks_all_data_queries(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_tenant_row()]
+        client = Mock()
+        client.query.side_effect = [
+            registry_job,
+            SimpleNamespace(total_bytes_processed=8),
+            SimpleNamespace(total_bytes_processed=8),
+        ]
+        policy = QueryPolicy(max_bytes_per_job=10, max_bytes_per_request=15)
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            unittest.mock.patch("main.query_policy", policy),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="初衣食午股份有限公司",
+                metric_ids=["total_sessions", "total_users"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        self.assertEqual(raised.exception.code, "query_cost_limit_exceeded")
+        self.assertEqual(client.query.call_count, 3)
 
     def test_metric_without_time_dimension_is_marked_all_available_data(self):
         result = semantic_catalog.search(

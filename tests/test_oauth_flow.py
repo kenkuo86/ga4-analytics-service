@@ -252,6 +252,10 @@ class OAuthFlowTests(unittest.TestCase):
         self.assertNotIn("project_id", query_schema["properties"])
         self.assertNotIn("profile", query_schema["properties"])
         self.assertNotIn("sql", query_schema["properties"])
+        query_description = next(
+            tool for tool in listed_tools if tool["name"] == "query_ga4"
+        )["description"]
+        self.assertIn("request-total", query_description)
         traffic_schema = next(tool for tool in listed_tools if tool["name"] == "traffic_summary")["inputSchema"]
         self.assertIn("customer_name", traffic_schema["properties"])
         self.assertNotIn("tenant_id", traffic_schema["properties"])
@@ -259,6 +263,7 @@ class OAuthFlowTests(unittest.TestCase):
             tool for tool in listed_tools if tool["name"] == "traffic_summary"
         )["description"]
         self.assertIn("never ask the user for project_id", traffic_description)
+        self.assertIn("BigQuery cost policy applies", traffic_description)
 
         authorized_rest = self.client.get(
             "/traffic-summary",

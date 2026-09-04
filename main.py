@@ -11,15 +11,13 @@ import google.auth
 from fastapi import Depends, FastAPI, HTTPException
 
 from oauth_auth import require_rest_oauth
+from query_policy import PreparedQuery, QueryPolicyError, query_policy
 from semantic_catalog import SemanticCatalogError, semantic_catalog
 
 app = FastAPI()
 
 # 改成你實際存放 tenant_registry 的完整 table ID
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
-SEMANTIC_MAX_BYTES_BILLED = int(
-    os.getenv("SEMANTIC_MAX_BYTES_BILLED", "10000000000")
-)
 
 
 class TenantResolutionError(ValueError):
@@ -134,12 +132,18 @@ def get_tenant_record(client: bigquery.Client, customer_name: str):
         ]
     )
 
-    rows = list(
-        client.query(
-            sql,
-            job_config=job_config,
-        ).result()
-    )
+    try:
+        rows = list(
+            client.query(
+                sql,
+                job_config=job_config,
+            ).result()
+        )
+    except Exception as error:
+        mapped_error = query_policy.map_bigquery_error(error)
+        if mapped_error is not None:
+            raise mapped_error from error
+        raise
 
     if not rows:
         raise TenantResolutionError(
@@ -212,7 +216,13 @@ def get_available_customers() -> dict:
     ORDER BY normalized_name
     """
 
-    rows = list(client.query(sql).result())
+    try:
+        rows = list(client.query(sql).result())
+    except Exception as error:
+        mapped_error = query_policy.map_bigquery_error(error)
+        if mapped_error is not None:
+            raise mapped_error from error
+        raise
     customer_names = [row.tenant_name for row in rows]
     return {
         "status": "ok",
@@ -236,28 +246,6 @@ def search_ga4_metric_catalog(
         profile=profile,
         limit=limit,
     )
-
-
-def _validated_date_range(start_date: str, end_date: str) -> tuple[date, date]:
-    try:
-        parsed_start = date.fromisoformat(start_date)
-        parsed_end = date.fromisoformat(end_date)
-    except ValueError as error:
-        raise SemanticCatalogError(
-            "invalid_date_range",
-            "日期必須使用 YYYY-MM-DD 格式。",
-        ) from error
-    if parsed_start > parsed_end:
-        raise SemanticCatalogError(
-            "invalid_date_range",
-            "start_date 不得晚於 end_date。",
-        )
-    if (parsed_end - parsed_start).days + 1 > 366:
-        raise SemanticCatalogError(
-            "date_range_too_large",
-            "單次 semantic query 最多查詢 366 天。",
-        )
-    return parsed_start, parsed_end
 
 
 def _serialize_bigquery_value(value: Any) -> Any:
@@ -317,7 +305,7 @@ def query_ga4_semantic_metrics(
         if normalized not in normalized_metric_ids:
             normalized_metric_ids.append(normalized)
 
-    parsed_start, parsed_end = _validated_date_range(start_date, end_date)
+    parsed_start, parsed_end = query_policy.validate_date_range(start_date, end_date)
     result_limit = max(1, min(int(limit), 200))
     client = get_bigquery_client()
     tenant = get_tenant_config(client, customer_name)
@@ -326,7 +314,7 @@ def query_ga4_semantic_metrics(
         tenant["semantic_profile"],
     )
     profile_resolution = "tenant_registry.ec"
-    metric_results = []
+    prepared_metrics = []
     for metric_id in normalized_metric_ids:
         sql, metric = semantic_catalog.compile_sql(
             profile=resolved_profile,
@@ -349,18 +337,37 @@ def query_ga4_semantic_metrics(
             query_parameters.append(
                 bigquery.ScalarQueryParameter("end_date", "DATE", parsed_end)
             )
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=query_parameters,
-            maximum_bytes_billed=SEMANTIC_MAX_BYTES_BILLED,
-            use_query_cache=True,
-            labels={
-                "component": "semantic",
-                "profile": resolved_profile.replace("_", "-")[:63],
-            },
+        prepared_metrics.append(
+            {
+                "metric_id": metric_id,
+                "metric": metric,
+                "date_scope": date_scope,
+                "query": PreparedQuery(
+                    name=metric_id,
+                    sql=sql,
+                    query_parameters=query_parameters,
+                    labels={
+                        "component": "semantic",
+                        "profile": resolved_profile.replace("_", "-")[:63],
+                    },
+                ),
+            }
         )
+
+    query_policy.preflight_request(
+        client,
+        [item["query"] for item in prepared_metrics],
+    )
+
+    metric_results = []
+    for item in prepared_metrics:
+        metric_id = item["metric_id"]
+        metric = item["metric"]
         try:
-            query_job = client.query(sql, job_config=job_config)
-            rows = list(query_job.result())
+            _, rows = query_policy.execute(client, item["query"])
+            rows = list(rows)
+        except QueryPolicyError:
+            raise
         except Exception as error:
             raise SemanticCatalogError(
                 "data_unavailable",
@@ -380,7 +387,7 @@ def query_ga4_semantic_metrics(
                 "main_metric": metric["main_metric"],
                 "category": metric["category"],
                 "dimensions": metric["dimensions"],
-                "date_scope": date_scope,
+                "date_scope": item["date_scope"],
                 "row_count": len(serialized_rows),
                 "truncated": truncated,
                 "rows": serialized_rows,
@@ -415,6 +422,11 @@ def get_traffic_summary(
     start_date: str,
     end_date: str,
 ):
+    parsed_start, parsed_end = query_policy.validate_date_range(
+        start_date,
+        end_date,
+        comparison_periods=1,
+    )
     client = get_bigquery_client()
 
     tenant = get_tenant_config(
@@ -437,26 +449,30 @@ def get_traffic_summary(
         dataset_id=tenant["dataset_id"],
     )
 
-    job_config = bigquery.QueryJobConfig(
+    prepared_query = PreparedQuery(
+        name="traffic_summary",
+        sql=sql,
         query_parameters=[
             bigquery.ScalarQueryParameter(
                 "start_date",
                 "DATE",
-                date.fromisoformat(start_date),
+                parsed_start,
             ),
             bigquery.ScalarQueryParameter(
                 "end_date",
                 "DATE",
-                date.fromisoformat(end_date),
+                parsed_end,
             ),
-        ]
+        ],
+        labels={"component": "traffic-summary"},
     )
 
+    query_policy.preflight_request(client, [prepared_query])
+
     try:
-        rows = client.query(
-            sql,
-            job_config=job_config,
-        ).result()
+        _, rows = query_policy.execute(client, prepared_query)
+    except QueryPolicyError:
+        raise
     except Exception as error:
         raise TenantResolutionError(
             "data_unavailable",
@@ -542,6 +558,16 @@ def traffic_summary(
         )
     except TenantResolutionError as error:
         status_code = 404 if error.code == "tenant_not_found" else 409
+        raise HTTPException(
+            status_code=status_code,
+            detail=error.as_result(),
+        )
+    except QueryPolicyError as error:
+        status_code = {
+            "daily_query_quota_exceeded": 429,
+            "query_cost_estimate_failed": 503,
+            "query_timeout": 504,
+        }.get(error.code, 400)
         raise HTTPException(
             status_code=status_code,
             detail=error.as_result(),
