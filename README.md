@@ -180,8 +180,10 @@ Claude Custom Connector 使用預先註冊的 public client：
 
 ## Development workflow
 
-後續 ROADMAP Phase 不直接在 `main` 實作。每個 Phase 至少使用一個獨立 branch
-與 Pull Request，並以繁體中文完整記錄改動重點、目標、驗收方式及實際驗收成果。
+後續 ROADMAP feature 不直接在 `main` 實作。開始前先分析所有未完成項目的依賴與
+平行實作風險；每個 Phase 至少使用一個獨立 branch 與 Pull Request，可獨立的 feature
+原則上各自使用 branch／PR，並以繁體中文完整記錄改動重點、目標、驗收方式及實際驗收成果。
+PR 完成後需經獨立 review；agent 可以發 PR，但最終只由 repository owner 合併。
 完整規則與 PR template 請見 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## Local verification
