@@ -18,6 +18,7 @@ from main import (
 )
 from oauth_auth import oauth_runtime
 from oauth_server import jwks_response
+from query_policy import QueryPolicyError
 from semantic_catalog import SemanticCatalogError
 
 from mcp.server.transport_security import TransportSecuritySettings
@@ -110,7 +111,7 @@ def customer_lookup(customer_name: str) -> dict:
     """
     try:
         return get_customer_status(customer_name)
-    except TenantResolutionError as error:
+    except (TenantResolutionError, QueryPolicyError) as error:
         return error.as_result()
 
 
@@ -128,6 +129,8 @@ def list_available_customers() -> dict:
     """
     try:
         return get_available_customers()
+    except QueryPolicyError as error:
+        return error.as_result()
     except Exception:
         return {
             "status": "data_unavailable",
@@ -178,7 +181,9 @@ def query_ga4(
     column, filter, group by, profile, or SQL input. Present only rows returned
     with status ok and retain routing metadata as internal context. Respect
     each metric's date_scope: do not describe an all_available_data result as
-    limited to start_date and end_date.
+    limited to start_date and end_date. The server enforces its configured date,
+    per-job, request-total, timeout, and daily BigQuery cost limits; relay a
+    structured limit error instead of retrying around it.
     """
     try:
         return query_ga4_semantic_metrics(
@@ -188,7 +193,7 @@ def query_ga4(
             end_date=end_date,
             limit=limit,
         )
-    except (TenantResolutionError, SemanticCatalogError) as error:
+    except (TenantResolutionError, SemanticCatalogError, QueryPolicyError) as error:
         return error.as_result()
 
 
@@ -211,7 +216,8 @@ def traffic_summary(
     result includes data_source routing metadata; retain it as context and
     never ask the user for project_id or dataset_id. For supported follow-up
     analyses such as source, medium, or campaign, use search_ga4_metrics and
-    query_ga4 rather than claiming arbitrary BigQuery access.
+    query_ga4 rather than claiming arbitrary BigQuery access. The same shared
+    date and BigQuery cost policy applies to this tool and the REST endpoint.
     """
     try:
         return get_traffic_summary(
@@ -219,7 +225,7 @@ def traffic_summary(
             start_date=start_date,
             end_date=end_date,
         )
-    except TenantResolutionError as error:
+    except (TenantResolutionError, QueryPolicyError) as error:
         return error.as_result()
 
 

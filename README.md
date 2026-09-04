@@ -92,6 +92,65 @@ Runtime BigQuery client 可透過 `BIGQUERY_BILLING_PROJECT` 明確指定 query 
 與計費專案；PoC 部署設為 `ga4-reports-dev`。該變數未設定或只有空白時，
 程式會維持原有行為，使用 Application Default Credentials 推斷的 project。
 
+## Query cost policy
+
+所有 GA4 tenant data query（`query_ga4`、MCP `traffic_summary` 與 REST
+`/traffic-summary`）共用 `QueryPolicy`。預設限制如下：
+
+- 日期必須是有效的 `YYYY-MM-DD`，起日不得晚於迄日，迄日不得晚於 policy
+  timezone（預設 `Asia/Taipei`）的今天。
+- 最早可查日期為 `2020-10-14`，單次期間最多 90 天（含起訖日）。
+- `traffic_summary` 的等長前期也必須落在最早日期之後；例如一天的本期最早只能從
+  `2020-10-15` 開始，因為 SQL 還會讀取 `2020-10-14` 作為前期。
+- 每個 BigQuery job 最多 2,000,000,000 bytes；同一 tool request 的 dry-run
+  預估總量最多 10,000,000,000 bytes。
+- 每個 tenant data query 都先執行不計費的 BigQuery dry run；整個 request 通過
+  job-level 與 request-level 檢查後才會開始執行實際 query，避免多 metric request
+  在後段才超額而留下部分執行結果。
+- 實際 query 開啟 query cache、設定 60 秒 job timeout，並加上
+  `component`、`cost-policy` 與 `stage` labels。
+
+Catalog 中標示為 `date_scope=all_available_data` 的既有 metrics 不使用日期參數，
+因此 90 天是 request contract 而不會縮小這些 metrics 的實際資料期間；它們仍必須
+通過相同 dry-run、2 GB/job 與 10 GB/request 成本限制。後續若要讓這些 metrics
+支援日期過濾，應在 semantic catalog 的 metric 定義階段處理。
+
+可用下列環境變數調整；服務啟動時會拒絕非正整數、無效日期，或 request 上限小於
+job 上限的設定：
+
+```text
+GA4_QUERY_MAX_DAYS=90
+GA4_QUERY_EARLIEST_DATE=2020-10-14
+GA4_QUERY_MAX_BYTES_PER_JOB=2000000000
+GA4_QUERY_MAX_BYTES_PER_REQUEST=10000000000
+GA4_QUERY_JOB_TIMEOUT_MS=60000
+GA4_QUERY_TIME_ZONE=Asia/Taipei
+```
+
+超過限制時會回傳可辨識的狀態，例如 `date_range_too_large`、
+`query_cost_limit_exceeded`、`daily_query_quota_exceeded` 或 `query_timeout`，不會
+一律轉成 `data_unavailable`。REST 對 daily quota 回傳 HTTP 429、cost estimate
+backend failure 回傳 503、timeout 回傳 504；輸入日期與預估成本拒絕回傳 400。
+
+應用程式以外的成本保險使用 `ga4-reports-dev` 的 BigQuery
+`QueryUsagePerDay` custom quota。Google Cloud 的 quota 單位是整數 MiB；50 GB
+採不超過目標值的 47,683 MiB，也就是 49,999,167,488 bytes。可用以下指令確認
+effective limit：
+
+```bash
+gcloud alpha services quota list \
+  --service=bigquery.googleapis.com \
+  --consumer=projects/ga4-reports-dev \
+  --filter='metric:bigquery.googleapis.com/quota/query/usage' \
+  --format=json
+```
+
+此 quota 只適用於 on-demand query，於太平洋時間午夜重置，且 Google 說明其
+執行值屬近似成本防線；精準的單次與 request-level 阻擋仍由 `QueryPolicy` 負責。
+它會計入所有透過 `ga4-reports-dev` 計費的 on-demand queries，不只本 connector。
+第一版不追蹤個別 OAuth 使用者的 daily usage；若後續需要個人配額，必須傳遞 OAuth
+`sub` 並使用持久 storage 記錄用量。
+
 ## PoC deployment
 
 一般改動使用固定的部署腳本：
@@ -116,7 +175,7 @@ scripts/deploy_poc.sh --allow-dirty
 
 Catalog 只接受 `SELECT`／`WITH` 單一查詢，且只能引用核准的 `ga4_mar` model。
 日期使用 BigQuery parameters，project 與 dataset 由 registry 解析；每次 query 另有結果
-筆數與 `SEMANTIC_MAX_BYTES_BILLED` 上限。`semantic/catalog.v1.json` 是產生物，請勿
+筆數與共用 `QueryPolicy` 上限。`semantic/catalog.v1.json` 是產生物，請勿
 手動修改。若來源定義未使用日期維度，查詢結果會標示
 `date_scope=all_available_data`；對話回覆不得把這類數字描述成指定期間的結果。
 
