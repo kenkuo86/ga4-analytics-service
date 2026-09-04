@@ -11,8 +11,9 @@
 - 提供 `customer_lookup`、`list_available_customers`、`search_ga4_metrics`、`query_ga4` 與相容用的 `traffic_summary`。
 - Cloud Run runtime service account 已具備目前 active tenants 的 dataset-level read access，query jobs 集中由 `ga4-reports-dev` 計費。
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
+- 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
 
-下一階段的重點不是繼續擴張查詢範圍，而是補齊成本防線、能力判斷、查詢可稽核性與一致的使用者體驗。
+下一階段的重點不是繼續擴張查詢範圍，而是強化能力判斷、查詢可稽核性與一致的使用者體驗，並持續監控成本防線。
 
 ## Completed foundations
 
@@ -80,9 +81,11 @@ Dependencies: Foundations 1–2
 
 ### Phase 4: unified query cost controls
 
-Status: Todo
+Status: Done
 
 Dependencies: None
+
+2026-09-04 已由 PR #3 完成並部署至 Cloud Run：日期上限為 90 天、每個 BigQuery job 上限為 2 GB、每個 tool request 合計上限為 10 GB，`ga4-reports-dev` project daily custom query quota 為 47,683 MiB（不超過 50 GB）。第一版不提供每位 OAuth 使用者的個別 daily quota。
 
 #### Goal
 
@@ -271,11 +274,8 @@ Dependencies: Phases 5–6
 
 ## Decisions to confirm before implementation
 
-開始 Phase 4 前，需要確認以下產品決策：
+目前仍需確認以下產品決策：
 
-1. 單次允許的最長查詢期間採 31 天還是 90 天。
-2. 每個 query job、每個 tool request，以及計費專案每天可接受的 bytes 上限。
-3. 是否需要第一版就提供每位 OAuth 使用者的個別 daily quota。
-4. 未登記但只有一個部分名稱候選時，直接查詢或先要求使用者確認。
-5. Query provenance 是否允許顯示完整 project／dataset table path。
-6. Traffic summary 折線圖要同圖顯示四個 metrics，或固定拆成多個小圖。
+1. 未登記但只有一個部分名稱候選時，直接查詢或先要求使用者確認。
+2. Query provenance 是否允許顯示完整 project／dataset table path。
+3. Traffic summary 折線圖要同圖顯示四個 metrics，或固定拆成多個小圖。
