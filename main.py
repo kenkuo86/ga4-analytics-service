@@ -13,6 +13,10 @@ from fastapi import Depends, FastAPI, HTTPException
 from oauth_auth import require_rest_oauth
 from query_policy import PreparedQuery, QueryPolicyError, query_policy
 from semantic_catalog import SemanticCatalogError, semantic_catalog
+from traffic_summary_report import (
+    TrafficSummaryReportError,
+    build_traffic_summary_report,
+)
 
 app = FastAPI()
 
@@ -480,66 +484,19 @@ def get_traffic_summary(
             f"客戶「{tenant['tenant_name']}」存在於 tenant registry，但目前無法取得 GA4 流量資料。",
         ) from error
 
-    row = next(iter(rows))
+    row_iterator = iter(rows)
+    try:
+        row = next(row_iterator)
+    except StopIteration as error:
+        raise TrafficSummaryReportError() from error
+    if next(row_iterator, None) is not None:
+        raise TrafficSummaryReportError()
 
-    return {
-        "status": "ok",
-        "tenant": {
-            "tenant_id": tenant["tenant_id"],
-            "tenant_name": tenant["tenant_name"],
-        },
-        "data_source": {
-            "project_id": tenant["project_id"],
-            "dataset_id": tenant["dataset_id"],
-        },
-        "period": {
-            "start_date": row.start_date.isoformat(),
-            "end_date": row.end_date.isoformat(),
-        },
-        "comparison_period": {
-            "start_date": row.previous_start_date.isoformat(),
-            "end_date": row.previous_end_date.isoformat(),
-        },
-        "current_period": {
-            "total_sessions":
-                row.current_period["total_sessions"],
+    return build_traffic_summary_report(
+        row=row,
+        tenant=tenant,
+    )
 
-            "total_users":
-                row.current_period["total_users"],
-
-            "new_users":
-                row.current_period["new_users"],
-
-            "returning_users":
-                row.current_period["returning_users"],
-        },
-        "previous_period": {
-            "total_sessions":
-                row.previous_period["total_sessions"],
-
-            "total_users":
-                row.previous_period["total_users"],
-
-            "new_users":
-                row.previous_period["new_users"],
-
-            "returning_users":
-                row.previous_period["returning_users"],
-        },
-        "change_pct": {
-            "total_sessions":
-                row.change_pct["total_sessions"],
-
-            "total_users":
-                row.change_pct["total_users"],
-
-            "new_users":
-                row.change_pct["new_users"],
-
-            "returning_users":
-                row.change_pct["returning_users"],
-        },
-    }
 
 @app.get(
     "/traffic-summary",
@@ -570,6 +527,11 @@ def traffic_summary(
         }.get(error.code, 400)
         raise HTTPException(
             status_code=status_code,
+            detail=error.as_result(),
+        )
+    except TrafficSummaryReportError as error:
+        raise HTTPException(
+            status_code=502,
             detail=error.as_result(),
         )
     except Exception as e:

@@ -206,6 +206,8 @@ Status: Todo
 
 Dependencies: Phase 4
 
+呈現決策：固定拆成四個 small-multiple 折線圖，每個 metric 一張圖，圖內各有本期與前期兩條 series；不使用難以辨識的單圖八條線。
+
 #### Goal
 
 讓 `traffic_summary` 每次都回傳足以產生相同折線圖的資料與呈現規格，避免同一個 tool 有時顯示表格、有時顯示圖表。
@@ -278,4 +280,3 @@ Dependencies: Phases 5–6
 
 1. 未登記但只有一個部分名稱候選時，直接查詢或先要求使用者確認。
 2. Query provenance 是否允許顯示完整 project／dataset table path。
-3. Traffic summary 折線圖要同圖顯示四個 metrics，或固定拆成多個小圖。
