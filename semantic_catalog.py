@@ -175,6 +175,61 @@ class SemanticCatalog:
             )
         return metric
 
+    def find_publishable_profiles(self, metric_ids: list[str]) -> list[str]:
+        """Return profiles that can publish the complete metric selection."""
+
+        metric_profiles: dict[str, list[str]] = {}
+        for metric_id in metric_ids:
+            published_profiles = [
+                profile
+                for profile in SUPPORTED_PROFILES
+                if (
+                    metric_id in self._profile_metrics(profile)
+                    and self._profile_metrics(profile)[metric_id]["status"]
+                    == "published"
+                )
+            ]
+            metric_profiles[metric_id] = published_profiles
+            if published_profiles:
+                continue
+
+            conflicting_profiles = [
+                profile
+                for profile in SUPPORTED_PROFILES
+                if (
+                    metric_id in self._profile_metrics(profile)
+                    and self._profile_metrics(profile)[metric_id]["status"]
+                    == "conflict"
+                )
+            ]
+            if conflicting_profiles:
+                raise SemanticCatalogError(
+                    "metric_definition_conflict",
+                    f"指標「{metric_id}」存在多個定義，尚未發布查詢。",
+                    details={
+                        "metric_id": metric_id,
+                        "profiles": conflicting_profiles,
+                    },
+                )
+            raise SemanticCatalogError(
+                "unsupported_metric",
+                f"semantic catalog 不支援指標「{metric_id}」。",
+                details={"metric_id": metric_id, "profiles": []},
+            )
+
+        candidates = [
+            profile
+            for profile in SUPPORTED_PROFILES
+            if all(profile in profiles for profiles in metric_profiles.values())
+        ]
+        if not candidates:
+            raise SemanticCatalogError(
+                "unsupported_metric",
+                "要求的指標組合沒有共同的可發布 semantic profile。",
+                details={"metric_profiles": metric_profiles},
+            )
+        return candidates
+
     def resolve_profile(
         self,
         metric_ids: list[str],
@@ -186,29 +241,7 @@ class SemanticCatalog:
                 self.get_metric(profile, metric_id)
             return profile, "explicit"
 
-        candidates = []
-        for candidate in SUPPORTED_PROFILES:
-            metrics = self._profile_metrics(candidate)
-            if all(
-                metric_id in metrics and metrics[metric_id]["status"] == "published"
-                for metric_id in metric_ids
-            ):
-                candidates.append(candidate)
-
-        if not candidates:
-            known_profiles = {
-                metric_id: [
-                    candidate
-                    for candidate in SUPPORTED_PROFILES
-                    if metric_id in self._profile_metrics(candidate)
-                ]
-                for metric_id in metric_ids
-            }
-            raise SemanticCatalogError(
-                "unsupported_metric",
-                "要求的指標組合沒有可用的 semantic profile。",
-                details={"metric_profiles": known_profiles},
-            )
+        candidates = self.find_publishable_profiles(metric_ids)
         if len(candidates) == 1:
             return candidates[0], "metric_availability"
 

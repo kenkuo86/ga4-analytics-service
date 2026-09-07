@@ -1,0 +1,455 @@
+[
+  {
+    "case_id": "google_ads_spend",
+    "operation": "capability_lookup",
+    "request": "請查 Google Ads 花費與 ROAS",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "seo_keyword_ranking",
+    "operation": "capability_lookup",
+    "request": "我要 SEO 關鍵字排名",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "seo_keyword_ranking",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "meta_ads_performance",
+    "operation": "capability_lookup",
+    "request": "Meta ads performance",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "facebook_ads_performance",
+    "operation": "capability_lookup",
+    "request": "Facebook 廣告成效",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "generic_ads_performance",
+    "operation": "capability_lookup",
+    "request": "請分析廣告成效",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "generic_seo_performance",
+    "operation": "capability_lookup",
+    "request": "請分析 SEO 表現",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "no_local_capability_match",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "crm_data",
+    "operation": "capability_lookup",
+    "request": "查 CRM 客戶終身價值",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "crm_no_space",
+    "operation": "capability_lookup",
+    "request": "查CRM資料",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "crm_lead_list",
+    "operation": "capability_lookup",
+    "request": "我要CRM名單",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "sales_pipeline",
+    "operation": "capability_lookup",
+    "request": "查銷售管線",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "lead_list",
+    "operation": "capability_lookup",
+    "request": "查名單",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_generate_lead_event",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 generate_lead events",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "count_generate_leads",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_lead_conversion",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 lead conversions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "count_generate_leads",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_chinese_lead_conversion_event",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 名單轉換事件",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "count_generate_leads",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "write_sql",
+    "operation": "capability_lookup",
+    "request": "幫我寫 SQL",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "arbitrary_bigquery",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "execute_select_star",
+    "operation": "capability_lookup",
+    "request": "執行 select *",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "arbitrary_bigquery",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "write_bigquery_data",
+    "operation": "capability_lookup",
+    "request": "請寫入 BigQuery 資料",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_organic_sessions",
+    "operation": "capability_lookup",
+    "request": "GA4 自然流量 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "unclear_analysis",
+    "operation": "capability_lookup",
+    "request": "分析客戶表現",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "no_local_capability_match",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "generic_traffic",
+    "operation": "capability_lookup",
+    "request": "流量",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "no_local_capability_match",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_ads_ga4_sessions",
+    "operation": "capability_lookup",
+    "request": "不要查 Google Ads，請查 GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_seo_ga4_organic",
+    "operation": "capability_lookup",
+    "request": "不是 SEO 關鍵字排名，我要 GA4 自然流量 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_crm_ga4_users",
+    "operation": "capability_lookup",
+    "request": "不需要 CRM，只查 GA4 使用者",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "polite_negated_ads_ga4_sessions",
+    "operation": "capability_lookup",
+    "request": "請不要查 Google Ads，請查 GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "first_person_negated_crm_ga4_users",
+    "operation": "capability_lookup",
+    "request": "我不要 CRM，只查 GA4 使用者",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "english_negated_ads_ga4_sessions",
+    "operation": "capability_lookup",
+    "request": "don't query Google Ads, query GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "double_negative_keep_ads",
+    "operation": "capability_lookup",
+    "request": "不要排除 Google Ads，請查 GA4 sessions",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "nested_negative_keep_ads",
+    "operation": "capability_lookup",
+    "request": "不是不要查 Google Ads，請查 GA4 sessions",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "double_negative_keep_crm",
+    "operation": "capability_lookup",
+    "request": "不要排除 CRM，請查 GA4 users",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "reported_negative_keep_salesforce",
+    "operation": "capability_lookup",
+    "request": "我沒有說不要查 Salesforce，請查 GA4 sessions",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "unpunctuated_negated_ads_ga4_sessions",
+    "operation": "capability_lookup",
+    "request": "不要查 Google Ads 請查 GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "affirmative_mixed_ga4_and_ads",
+    "operation": "capability_lookup",
+    "request": "比較 GA4 sessions 與 Google Ads 花費",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_raw_sql",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions with SELECT user_id FROM raw.events",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "arbitrary_bigquery",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_raw_sql_phrase",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions with raw SQL",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "arbitrary_bigquery",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_execute_sql",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions and execute SQL",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "arbitrary_bigquery",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "custom_bigquery_query",
+    "operation": "capability_lookup",
+    "request": "custom BigQuery query",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "arbitrary_bigquery",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_salesforce_opportunities",
+    "operation": "capability_lookup",
+    "request": "比較 GA4 sessions 與 Salesforce opportunities",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_lead_event_and_external_list",
+    "operation": "capability_lookup",
+    "request": "比較 GA4 generate_lead events 與 lead list",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_generate_lead_and_chinese_list",
+    "operation": "capability_lookup",
+    "request": "比較 GA4 generate_lead 與查名單",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_lead_conversion_and_fetch_leads",
+    "operation": "capability_lookup",
+    "request": "GA4 lead conversions and fetch leads",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_sessions_and_show_leads",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions and show me leads",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_sessions_and_download_leads",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions and download leads",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_chinese_lead_event_and_customer_list",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 名單事件與客戶名單",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_weather",
+    "operation": "capability_lookup",
+    "request": "比較 GA4 sessions 與 weather",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "external_data_source",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_erase_records",
+    "operation": "capability_lookup",
+    "request": "查 GA4 sessions then erase records",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_truncate_table",
+    "operation": "capability_lookup",
+    "request": "查 GA4 sessions then truncate table",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_purge_records",
+    "operation": "capability_lookup",
+    "request": "查 GA4 sessions then purge records",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "overwrite_table",
+    "operation": "capability_lookup",
+    "request": "overwrite the table",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "alter_table",
+    "operation": "capability_lookup",
+    "request": "alter table",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "remove_records",
+    "operation": "capability_lookup",
+    "request": "remove records",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "stock_prices",
+    "operation": "capability_lookup",
+    "request": "stock prices",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "external_data_source",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_unknown_clause",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions and lunar phase",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_external_preserves_destructive_request",
+    "operation": "capability_lookup",
+    "request": "不要查 Google Ads 請刪除資料",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "explicit_ga4_unknown_analysis",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 神秘指標",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "no_local_capability_match",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "unknown_metric_direct_query",
+    "operation": "query_ga4",
+    "metric_ids": ["invented_roas"],
+    "start_date": "2026-08-17",
+    "end_date": "2026-08-23",
+    "expected_error": "unsupported_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "date_range_too_large",
+    "operation": "query_ga4",
+    "metric_ids": ["total_sessions"],
+    "start_date": "2026-01-01",
+    "end_date": "2026-04-01",
+    "expected_error": "date_range_too_large",
+    "expected_bigquery_calls": 0
+  }
+]
