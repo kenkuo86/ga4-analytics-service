@@ -43,6 +43,7 @@ os.environ.update(
 
 from starlette.testclient import TestClient  # noqa: E402
 
+from capability_registry import capability_registry  # noqa: E402
 from mcp_server import app  # noqa: E402
 from oauth_auth import oauth_runtime  # noqa: E402
 
@@ -229,18 +230,20 @@ class OAuthFlowTests(unittest.TestCase):
         listed_tools = tools.json()["result"]["tools"]
         self.assertEqual(
             [tool["name"] for tool in listed_tools],
-            [
-                "customer_lookup",
-                "list_available_customers",
-                "search_ga4_metrics",
-                "query_ga4",
-                "traffic_summary",
-            ],
+            list(capability_registry.public_tool_names()),
         )
         customer_list_schema = next(
             tool for tool in listed_tools if tool["name"] == "list_available_customers"
         )["inputSchema"]
         self.assertEqual(customer_list_schema["properties"], {})
+        capability_schema = next(
+            tool for tool in listed_tools if tool["name"] == "get_ga4_capabilities"
+        )["inputSchema"]
+        self.assertIn("request", capability_schema["properties"])
+        capability_description = next(
+            tool for tool in listed_tools if tool["name"] == "get_ga4_capabilities"
+        )["description"]
+        self.assertIn("local, versioned capability metadata", capability_description)
         search_schema = next(
             tool for tool in listed_tools if tool["name"] == "search_ga4_metrics"
         )["inputSchema"]

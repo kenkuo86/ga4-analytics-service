@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock
+
+from capability_registry import capability_registry
+from main import get_ga4_capability_resolution, query_ga4_semantic_metrics
+from query_policy import QueryPolicyError
+from semantic_catalog import SemanticCatalogError
+
+
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "capability_eval_cases.json"
+
+
+class PhaseFiveCapabilityRegistryTests(unittest.TestCase):
+    def test_inventory_is_versioned_and_declares_public_tools(self):
+        result = get_ga4_capability_resolution()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["registry_version"], "1.0.0")
+        self.assertEqual(result["data_access"], "local_metadata_only")
+        self.assertFalse(result["selection_token_required"])
+        self.assertEqual(
+            result["public_tools"],
+            [
+                "customer_lookup",
+                "list_available_customers",
+                "get_ga4_capabilities",
+                "search_ga4_metrics",
+                "query_ga4",
+                "traffic_summary",
+            ],
+        )
+
+    def test_empty_or_unclear_request_needs_clarification(self):
+        for request in ("", "分析客戶表現"):
+            with self.subTest(request=request):
+                result = get_ga4_capability_resolution(request)
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["next_action"]["type"], "ask_user")
+                self.assertEqual(result["data_access"], "local_metadata_only")
+
+    def test_connector_behavior_eval_cases(self):
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+        for case in cases:
+            with self.subTest(case=case["case_id"]):
+                client_factory = Mock()
+                with unittest.mock.patch(
+                    "main.get_bigquery_client",
+                    client_factory,
+                ):
+                    if case["operation"] == "capability_lookup":
+                        result = get_ga4_capability_resolution(case["request"])
+                        self.assertEqual(
+                            result["resolution"], case["expected_resolution"]
+                        )
+                        self.assertEqual(
+                            result["reason_code"], case["expected_reason_code"]
+                        )
+                        if result["resolution"] == "supported":
+                            self.assertTrue(result["metric_candidates"])
+                    else:
+                        expected_error = (
+                            QueryPolicyError
+                            if case["expected_error"] == "date_range_too_large"
+                            else SemanticCatalogError
+                        )
+                        with self.assertRaises(expected_error) as raised:
+                            query_ga4_semantic_metrics(
+                                customer_name="測試客戶",
+                                metric_ids=case["metric_ids"],
+                                start_date=case["start_date"],
+                                end_date=case["end_date"],
+                            )
+                        self.assertEqual(
+                            raised.exception.code,
+                            case["expected_error"],
+                        )
+
+                self.assertEqual(
+                    client_factory.call_count,
+                    case["expected_bigquery_calls"],
+                )
+
+    def test_profile_mismatch_reads_registry_but_not_tenant_data(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            SimpleNamespace(
+                tenant_id="71",
+                tenant_name="測試客戶",
+                project_id="customer-project",
+                status="active",
+                ec=False,
+            )
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="測試客戶",
+                metric_ids=["aov"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        self.assertEqual(raised.exception.code, "unsupported_metric")
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_tool_descriptions_come_from_registry(self):
+        for tool_name in capability_registry.public_tool_names():
+            with self.subTest(tool=tool_name):
+                description = capability_registry.tool_description(tool_name)
+                self.assertTrue(description)
+                self.assertNotIn("tenant_id input", description)
+
+
+if __name__ == "__main__":
+    unittest.main()
