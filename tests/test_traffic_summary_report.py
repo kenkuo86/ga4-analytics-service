@@ -332,7 +332,7 @@ class TrafficSummaryReportTests(unittest.TestCase):
         main.app.dependency_overrides[main.require_rest_oauth] = lambda: {}
         try:
             with (
-                patch("main.get_traffic_summary", return_value=report),
+                patch("main.get_traffic_summary", return_value=report) as rest_summary,
                 TestClient(main.app) as client,
             ):
                 response = client.get(
@@ -341,19 +341,35 @@ class TrafficSummaryReportTests(unittest.TestCase):
                         "customer_name": "customer",
                         "start_date": "2026-06-01",
                         "end_date": "2026-06-01",
+                        "include_query": "true",
                     },
                 )
-            with patch("mcp_server.get_traffic_summary", return_value=report):
+            with patch(
+                "mcp_server.get_traffic_summary", return_value=report
+            ) as mcp_summary:
                 mcp_result = mcp_server.traffic_summary(
                     "customer",
                     "2026-06-01",
                     "2026-06-01",
+                    include_query=True,
                 )
         finally:
             main.app.dependency_overrides.clear()
 
         self.assertEqual(response.json(), report)
         self.assertEqual(mcp_result, report)
+        rest_summary.assert_called_once_with(
+            customer_name="customer",
+            start_date="2026-06-01",
+            end_date="2026-06-01",
+            include_query=True,
+        )
+        mcp_summary.assert_called_once_with(
+            customer_name="customer",
+            start_date="2026-06-01",
+            end_date="2026-06-01",
+            include_query=True,
+        )
 
     def test_rest_and_mcp_return_the_same_safe_contract_error(self):
         error = TrafficSummaryReportError()

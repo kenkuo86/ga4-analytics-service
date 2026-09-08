@@ -75,6 +75,24 @@ connector eval 驗收。
 `day_index` 對齊，缺失日期已由服務補成 0。`headline_metrics` 提供同一份查詢的
 期間總覽，不能由每日資料重新推算 distinct users。
 
+## Query provenance
+
+`query_ga4` 與 `traffic_summary` 的 `include_query` 預設為 `false`。只有使用者明確要求
+查核 SQL、參數或 BigQuery job 時才設為 `true`；一般結果不會增加 query provenance。
+
+啟用後，結果會附上 versioned `query_provenance`，逐一列出實際送出的 parameterized SQL、
+獨立的 query parameters、metric ID、BigQuery job ID、cache hit、bytes processed、bytes
+billed、catalog version 與執行狀態。多 metric request 會依實際 query 順序回傳全部 records；
+若成本 preflight 或資料查詢失敗，結構化錯誤也會保留可安全提供的 provenance，未執行的 query
+會標示為 `not_executed`。參數永遠不會插值進 SQL 字串。
+
+MCP tool 直接傳 `include_query=true`。REST `GET /traffic-summary` 使用同名 query parameter，
+例如：
+
+```text
+/traffic-summary?customer_name=客戶&start_date=2026-08-17&end_date=2026-08-23&include_query=true
+```
+
 當使用者詢問「目前有哪些客戶可以查詢」時，connector 應直接呼叫
 `list_available_customers` 並列出客戶名稱。Registry Google Sheet 是管理介面，
 不作為預設回答，以免暴露不必要的內部欄位或讓使用者受 Sheet 分享權限影響。

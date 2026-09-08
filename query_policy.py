@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 import os
 import re
 from typing import Any, Mapping, Sequence
@@ -17,6 +18,7 @@ DEFAULT_MAX_BYTES_PER_JOB = 2_000_000_000
 DEFAULT_MAX_BYTES_PER_REQUEST = 10_000_000_000
 DEFAULT_JOB_TIMEOUT_MS = 60_000
 DEFAULT_TIME_ZONE = "Asia/Taipei"
+QUERY_PROVENANCE_SCHEMA_VERSION = "1.0.0"
 
 _ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -54,6 +56,116 @@ class PreparedQuery:
     sql: str
     query_parameters: Sequence[Any]
     labels: Mapping[str, str]
+    catalog_version: str | None = None
+
+
+def _serialize_query_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _serialize_query_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_serialize_query_value(item) for item in value]
+    return str(value)
+
+
+def serialize_query_parameters(parameters: Sequence[Any]) -> list[dict[str, Any]]:
+    """Expose parameter values separately from SQL without interpolating them."""
+
+    serialized = []
+    for parameter in parameters:
+        parameter_type = getattr(parameter, "type_", None)
+        if parameter_type is None:
+            parameter_type = getattr(parameter, "type", None)
+        if parameter_type is None:
+            api_repr: Any = getattr(parameter, "to_api_repr", lambda: {})()
+            parameter_type = (
+                api_repr.get("parameterType", {}).get("type")
+                if isinstance(api_repr, Mapping)
+                else None
+            )
+        serialized.append(
+            {
+                "name": getattr(parameter, "name", None),
+                "type": str(parameter_type) if parameter_type is not None else None,
+                "value": _serialize_query_value(getattr(parameter, "value", None)),
+            }
+        )
+    return serialized
+
+
+def build_query_provenance(
+    query: PreparedQuery,
+    *,
+    job: Any = None,
+    status: str = "succeeded",
+    estimated_bytes_processed: int | None = None,
+) -> dict[str, Any]:
+    """Build an audit record from the exact query and BigQuery job metadata."""
+
+    def optional_int(field_name: str) -> int | None:
+        if job is None:
+            return None
+        try:
+            value = getattr(job, field_name, None)
+        except Exception:
+            return None
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    try:
+        job_id = getattr(job, "job_id", None) if job is not None else None
+    except Exception:
+        job_id = None
+    if not isinstance(job_id, str):
+        job_id = None
+    try:
+        cache_hit = getattr(job, "cache_hit", None) if job is not None else None
+    except Exception:
+        cache_hit = None
+    if not isinstance(cache_hit, bool):
+        cache_hit = None
+
+    record: dict[str, Any] = {
+        "metric_id": query.name,
+        "status": status,
+        "sql": query.sql,
+        "parameters": serialize_query_parameters(query.query_parameters),
+        "job_id": job_id,
+        "cache_hit": cache_hit,
+        "bytes_processed": optional_int("total_bytes_processed"),
+        "bytes_billed": optional_int("total_bytes_billed"),
+        "catalog_version": query.catalog_version,
+    }
+    if estimated_bytes_processed is not None:
+        record["estimated_bytes_processed"] = estimated_bytes_processed
+    return record
+
+
+def attach_query_provenance(error: Exception, records: Sequence[Mapping[str, Any]]) -> None:
+    """Add opt-in provenance to an existing structured service error."""
+
+    if not records:
+        return
+    details = getattr(error, "details", {})
+    setattr(error, "details", {
+        **(details if isinstance(details, Mapping) else {}),
+        "query_provenance": {
+            "schema_version": QUERY_PROVENANCE_SCHEMA_VERSION,
+            "queries": [dict(record) for record in records],
+        },
+    })
 
 
 @dataclass(frozen=True)
@@ -273,6 +385,7 @@ class QueryPolicy:
         client: bigquery.Client,
         query: PreparedQuery,
     ) -> tuple[Any, Any]:
+        query_job = None
         job_config = bigquery.QueryJobConfig(
             query_parameters=list(query.query_parameters),
             maximum_bytes_billed=self.max_bytes_per_job,
@@ -285,8 +398,20 @@ class QueryPolicy:
             rows = query_job.result(timeout=self.job_timeout_ms / 1000)
             return query_job, rows
         except Exception as error:
+            if query_job is not None:
+                # Preserve the real job for opt-in provenance when result()
+                # fails after BigQuery accepted the query.
+                try:
+                    setattr(error, "_query_job", query_job)
+                except Exception:
+                    pass
             mapped_error = self.map_bigquery_error(error)
             if mapped_error is not None:
+                if query_job is not None:
+                    try:
+                        setattr(mapped_error, "_query_job", query_job)
+                    except Exception:
+                        pass
                 raise mapped_error from error
             raise
 

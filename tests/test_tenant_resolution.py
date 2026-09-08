@@ -268,12 +268,113 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertEqual(result["report_schema_version"], "1.0.0")
         self.assertEqual(len(result["daily_series"]), 7)
         self.assertEqual(result["presentation"]["type"], "line_chart")
+        self.assertNotIn("query_provenance", result)
         self.assertEqual(len(client.query.call_args_list), 3)
         execution_config = client.query.call_args_list[2].kwargs["job_config"]
         self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
         self.assertTrue(execution_config.use_query_cache)
         self.assertEqual(execution_config.job_timeout_ms, "60000")
         self.assertEqual(execution_config.labels["component"], "traffic-summary")
+
+    def test_traffic_summary_returns_query_provenance_when_requested(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_row(project_id="customer-project")]
+        summary_job = Mock()
+        summary_job.job_id = "job-traffic-summary"
+        summary_job.cache_hit = True
+        summary_job.total_bytes_processed = 8_000_000
+        summary_job.total_bytes_billed = 0
+        summary_job.result.return_value = [
+            SimpleNamespace(
+                start_date=date(2026, 8, 17),
+                end_date=date(2026, 8, 23),
+                previous_start_date=date(2026, 8, 10),
+                previous_end_date=date(2026, 8, 16),
+                current_period={
+                    "total_sessions": 100,
+                    "total_users": 80,
+                    "new_users": 60,
+                    "returning_users": 30,
+                },
+                previous_period={
+                    "total_sessions": 120,
+                    "total_users": 90,
+                    "new_users": 70,
+                    "returning_users": 35,
+                },
+                change_pct={
+                    "total_sessions": -16.67,
+                    "total_users": -11.11,
+                    "new_users": -14.29,
+                    "returning_users": -14.29,
+                },
+                daily_series=_traffic_daily_series(
+                    date(2026, 8, 17),
+                    date(2026, 8, 10),
+                    7,
+                ),
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=7_000_000)
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, summary_job]
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-08-17",
+                "2026-08-23",
+                include_query=True,
+            )
+
+        provenance = result["query_provenance"]
+        self.assertEqual(provenance["schema_version"], "1.0.0")
+        self.assertEqual(len(provenance["queries"]), 1)
+        query = provenance["queries"][0]
+        self.assertEqual(query["metric_id"], "traffic_summary")
+        self.assertEqual(query["job_id"], "job-traffic-summary")
+        self.assertTrue(query["cache_hit"])
+        self.assertEqual(query["bytes_processed"], 8_000_000)
+        self.assertEqual(query["bytes_billed"], 0)
+        self.assertEqual(query["estimated_bytes_processed"], 7_000_000)
+        self.assertEqual(
+            query["parameters"],
+            [
+                {"name": "start_date", "type": "DATE", "value": "2026-08-17"},
+                {"name": "end_date", "type": "DATE", "value": "2026-08-23"},
+            ],
+        )
+
+    def test_failed_traffic_query_keeps_structured_provenance(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_row(project_id="customer-project")]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        failed_job = Mock()
+        failed_job.job_id = "job-traffic-failed"
+        failed_job.cache_hit = False
+        failed_job.total_bytes_processed = 6_000_000
+        failed_job.total_bytes_billed = 6_000_000
+        failed_job.result.side_effect = RuntimeError("query failed")
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, failed_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(TenantResolutionError) as raised,
+        ):
+            get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-08-17",
+                "2026-08-23",
+                include_query=True,
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "data_unavailable")
+        self.assertEqual(
+            result["details"]["query_provenance"]["queries"][0]["job_id"],
+            "job-traffic-failed",
+        )
 
     def test_traffic_summary_validates_dates_before_bigquery(self):
         with (

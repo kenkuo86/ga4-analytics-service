@@ -126,6 +126,7 @@ def query_ga4(
     start_date: str,
     end_date: str,
     limit: int = 50,
+    include_query: bool = False,
 ) -> dict:
     """Query metrics using the capability registry's public contract."""
     try:
@@ -135,6 +136,7 @@ def query_ga4(
             start_date=start_date,
             end_date=end_date,
             limit=limit,
+            include_query=include_query,
         )
     except (TenantResolutionError, SemanticCatalogError, QueryPolicyError) as error:
         return error.as_result()
@@ -145,6 +147,7 @@ def traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
+    include_query: bool = False,
 ) -> dict:
     """Run the traffic report described by the capability registry."""
     try:
@@ -152,6 +155,7 @@ def traffic_summary(
             customer_name=customer_name,
             start_date=start_date,
             end_date=end_date,
+            include_query=include_query,
         )
     except (
         TenantResolutionError,

@@ -53,16 +53,20 @@ _SERIES = (
 class TrafficSummaryReportError(RuntimeError):
     """The query result could not be represented by the public report contract."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(REPORT_CONTRACT_ERROR_MESSAGE)
         self.code = REPORT_CONTRACT_ERROR_CODE
         self.message = REPORT_CONTRACT_ERROR_MESSAGE
+        self.details = details or {}
 
-    def as_result(self) -> dict[str, str]:
-        return {
+    def as_result(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "status": self.code,
             "message": self.message,
         }
+        if self.details:
+            result["details"] = self.details
+        return result
 
 
 def _field(value: Any, name: str) -> Any:
