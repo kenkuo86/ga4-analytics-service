@@ -172,6 +172,19 @@ class CapabilityRegistry:
             rf".{{0,12}}{ga4_attribution_metric}"
             rf")"
         )
+        crm_platform = r"(?:crm|salesforce|hubspot)"
+        self._crm_exclusive_metric_pattern = re.compile(
+            r"(?:records?|lists?|leads?|opportunit(?:y|ies)|pipeline|"
+            r"customer\s+lifetime\s+value|資料|紀錄|記錄|名單|清單|銷售管線|客戶終身價值)"
+        )
+        self._explicit_ga4_crm_attribution_pattern = re.compile(
+            rf"{ga4_source}(?:"
+            rf".{{0,32}}{ga4_attribution_metric}.{{0,12}}"
+            rf"{attribution_connector}.{{0,12}}{crm_platform}|"
+            rf".{{0,12}}{attribution_connector}.{{0,12}}{crm_platform}"
+            rf".{{0,20}}{ga4_attribution_metric}"
+            rf")"
+        )
         self._explicit_ga4_site_search_pattern = re.compile(
             rf"{ga4_source}.{{0,20}}(?:站內搜尋(?:關鍵字|字詞)|site\s+search\s+terms?|"
             r"search\s+terms?)"
@@ -446,6 +459,10 @@ class CapabilityRegistry:
             normalized_request
         )
         is_ga4_ads_attribution = ga4_ads_attribution_match is not None
+        ga4_crm_attribution_match = self._explicit_ga4_crm_attribution_pattern.search(
+            normalized_request
+        )
+        is_ga4_crm_attribution = ga4_crm_attribution_match is not None
         is_ga4_site_search = (
             self._explicit_ga4_site_search_pattern.search(normalized_request)
             is not None
@@ -463,6 +480,14 @@ class CapabilityRegistry:
             if intent.intent_id == "crm" and is_ga4_lead_metric:
                 intent_request = self._explicit_ga4_lead_metric_pattern.sub(
                     " ", normalized_request
+                )
+            if (
+                intent.intent_id == "crm"
+                and is_ga4_crm_attribution
+                and not self._crm_exclusive_metric_pattern.search(intent_request)
+            ):
+                intent_request = self._explicit_ga4_crm_attribution_pattern.sub(
+                    " ", intent_request
                 )
             if intent.matches(intent_request):
                 return self._resolution(
@@ -501,6 +526,10 @@ class CapabilityRegistry:
                 catalog_query = f"{catalog_query} generate_lead"
             if is_ga4_ads_attribution:
                 catalog_query = f"{catalog_query} attributed conversions source"
+            if is_ga4_crm_attribution:
+                catalog_query = (
+                    f"{catalog_query} attributed conversions source campaign"
+                )
             if is_ga4_site_search:
                 catalog_query = f"{catalog_query} search_terms_count search_term"
             search_result = self.catalog.search(catalog_query, limit=10)
@@ -509,6 +538,7 @@ class CapabilityRegistry:
         if search_result["metrics"] and (
             is_ga4_lead_metric
             or is_ga4_ads_attribution
+            or is_ga4_crm_attribution
             or is_ga4_site_search
             or self._has_catalog_match(normalized_request, search_result["metrics"])
         ):
@@ -650,7 +680,94 @@ class CapabilityRegistry:
             for term in terms:
                 catalog_tokens.update(re.findall(r"[a-z0-9]+", term.casefold()))
 
-        return request_tokens.issubset(catalog_tokens | known_ga4_values)
+        if not request_tokens.issubset(catalog_tokens | known_ga4_values):
+            return False
+
+        chinese_residue = "".join(re.findall(r"[\u3400-\u9fff]+", request))
+        ignored_chinese_phrases = {
+            "一",
+            "七",
+            "三",
+            "上個月",
+            "上週",
+            "下",
+            "之",
+            "二",
+            "五",
+            "今年",
+            "今天",
+            "以",
+            "依",
+            "六",
+            "分析",
+            "列出",
+            "前",
+            "十",
+            "去年",
+            "取得",
+            "呈現",
+            "四",
+            "天",
+            "年",
+            "我想看",
+            "我要",
+            "按",
+            "指標",
+            "搜尋",
+            "數據",
+            "日",
+            "明細",
+            "昨天",
+            "最近",
+            "月",
+            "本月",
+            "本週",
+            "查",
+            "查詢",
+            "查看",
+            "比較",
+            "每個月",
+            "每日",
+            "每週",
+            "的",
+            "請",
+            "給我",
+            "資料",
+            "趨勢",
+            "近",
+            "過去",
+            "顯示",
+        }
+        known_chinese_values = {
+            "付費",
+            "使用者",
+            "來源",
+            "媒介",
+            "工作階段",
+            "收益",
+            "活動",
+            "推薦流量",
+            "直接流量",
+            "自然流量",
+            "裝置",
+            "轉換",
+        }
+        catalog_chinese_phrases = {
+            phrase
+            for candidate in candidates
+            for term in (
+                candidate["label"],
+                *(dimension["label"] for dimension in candidate["dimensions"]),
+            )
+            for phrase in re.findall(r"[\u3400-\u9fff]+", term)
+        }
+        for phrase in sorted(
+            ignored_chinese_phrases | known_chinese_values | catalog_chinese_phrases,
+            key=len,
+            reverse=True,
+        ):
+            chinese_residue = chinese_residue.replace(phrase, "")
+        return not chinese_residue
 
     def _is_query_qualifier_clause(self, clause: str) -> bool:
         """Recognize customer and period context, not a second analysis request."""
@@ -671,16 +788,28 @@ class CapabilityRegistry:
         request_compact = self._compact(request)
         request_tokens = set(re.findall(r"[a-z0-9]+", request.casefold()))
         request_signal_tokens = request_tokens - {
+            "analyze",
             "analytics",
             "breakdown",
             "by",
+            "check",
+            "display",
+            "fetch",
+            "find",
             "ga4",
+            "get",
+            "give",
             "google",
+            "list",
             "me",
             "of",
             "please",
+            "query",
+            "report",
+            "retrieve",
             "show",
             "the",
+            "view",
         }
         request_chinese_terms = re.findall(r"[\u3400-\u9fff]{2,}", request)
         for candidate in candidates:

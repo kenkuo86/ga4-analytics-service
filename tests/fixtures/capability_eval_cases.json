@@ -639,6 +639,30 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "mixed_chinese_tiktok_sessions",
+    "operation": "capability_lookup",
+    "request": "顯示 GA4 工作階段與抖音工作階段",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_chinese_email_sessions",
+    "operation": "capability_lookup",
+    "request": "顯示 GA4 使用者與電子郵件工作階段",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_chinese_supported_metrics",
+    "operation": "capability_lookup",
+    "request": "顯示 GA4 使用者與工作階段",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "chinese_customer_name_with_conjunction_character",
     "operation": "capability_lookup",
     "request": "客戶：大和公司，查 GA4 工作階段",
@@ -687,6 +711,22 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "ga4_source_dimension_alias_with_query_verb",
+    "operation": "capability_lookup",
+    "request": "Query GA4 source",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_source_dimension_alias_with_list_verb",
+    "operation": "capability_lookup",
+    "request": "List GA4 source",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "ga4_medium_dimension_alias",
     "operation": "capability_lookup",
     "request": "Show GA4 medium",
@@ -727,6 +767,31 @@
     "expected_resolution": "supported",
     "expected_reason_code": "ga4_semantic_metric",
     "expected_candidate_metric_id": "attributed_conversions_by_source",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_hubspot_attributed_sessions",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions from HubSpot",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_salesforce_attributed_conversions",
+    "operation": "capability_lookup",
+    "request": "Show GA4 conversions from Salesforce campaigns",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "attributed_conversions_by_campaign",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_hubspot_records_remain_unsupported",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions from HubSpot records",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
     "expected_bigquery_calls": 0
   },
   {
