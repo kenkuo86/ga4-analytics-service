@@ -280,12 +280,6 @@ class CapabilityRegistry:
         )
 
         self._explicit_ga4_pattern = re.compile(r"ga\s*4|google\s*analytics")
-        self._ga4_analysis_pattern = re.compile(
-            r"sessions?|工作階段|流量|users?|使用者|新使用者|回訪|自然流量|organic|"
-            r"轉換|conversions?|收益|revenue|來源|source|媒介|medium|campaign|活動|"
-            r"頁面|pages?|engagement|參與|裝置|devices?|地理|geo|購買|purchase|事件|events?|"
-            r"generate[_\s-]?leads?|(?<![a-z])leads?(?![a-z])|名單"
-        )
         ga4_source = r"(?:ga\s*4|google\s*analytics)"
         ga4_lead_metric = (
             r"(?:generate[_\s-]?leads?|lead(?:\s+(?:conversions?|events?))?|"
@@ -306,6 +300,22 @@ class CapabilityRegistry:
             r"(?:不要|不用|不需要|無需|別|不是|排除|do\s+not|don['’]?t|dont)"
             r"\s*(?:(?:查|看|分析|使用)|(?:query|use|include))?\s*"
             rf"(?:{external_object})"
+        )
+        self._customer_qualifier_pattern = re.compile(
+            r"(?:for\s+[a-z0-9][a-z0-9 ._-]*|"
+            r"(?:customer|client|account|tenant)\s*[:：]\s*[a-z0-9][a-z0-9 ._-]*|"
+            r"(?:客戶|帳戶|租戶)(?:名稱)?\s*(?:是|為|[:：])\s*[\u3400-\u9fff0-9a-z ._-]+)"
+        )
+        self._period_qualifier_pattern = re.compile(
+            r"(?:"
+            r"(?:最近|過去|近|前|本|上|這|上一個)\s*(?:\d+|[一二三四五六七八九十]+)?\s*"
+            r"(?:天|日|週|周|星期|個月|月|年)|"
+            r"(?:今天|昨天|本週|這週|上週|本月|這個月|上個月|今年|去年)|"
+            r"(?:past|last|previous|recent)\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
+            r"(?:day|days|week|weeks|month|months|year|years)|"
+            r"(?:today|yesterday|this\s+week|last\s+week|this\s+month|last\s+month)|"
+            r"\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\s*(?:到|至|to|through|~|－|-)\s*\d{4}[-/]\d{1,2}[-/]\d{1,2})?"
+            r")"
         )
 
     @staticmethod
@@ -428,18 +438,17 @@ class CapabilityRegistry:
                 next_action={"type": "call_tool", "tool": "traffic_summary"},
             )
 
-        has_explicit_ga4_analysis = bool(
-            self._explicit_ga4_pattern.search(normalized_request)
-            and self._ga4_analysis_pattern.search(normalized_request)
-        )
-        if has_explicit_ga4_analysis:
+        if self._explicit_ga4_pattern.search(normalized_request):
             catalog_query = normalized_request
             if is_ga4_lead_metric:
                 catalog_query = f"{catalog_query} generate_lead"
             search_result = self.catalog.search(catalog_query, limit=10)
         else:
             search_result = {"metrics": []}
-        if search_result["metrics"]:
+        if search_result["metrics"] and (
+            is_ga4_lead_metric
+            or self._has_catalog_match(normalized_request, search_result["metrics"])
+        ):
             return self._resolution(
                 request=request,
                 resolution="supported",
@@ -509,32 +518,63 @@ class CapabilityRegistry:
         for clause in clauses:
             if self._is_query_qualifier_clause(clause):
                 continue
-            if not self._ga4_analysis_pattern.search(clause):
-                return clause
-            if not self.catalog.search(clause, limit=1)["metrics"]:
+            candidates = self.catalog.search(clause, limit=10)["metrics"]
+            if not candidates or not self._has_catalog_match(clause, candidates):
                 return clause
         return None
 
-    @staticmethod
-    def _is_query_qualifier_clause(clause: str) -> bool:
+    def _is_query_qualifier_clause(self, clause: str) -> bool:
         """Recognize customer and period context, not a second analysis request."""
 
         normalized = clause.strip()
-        if re.fullmatch(
-            r"(?:for|from|by)\s+[a-z0-9][a-z0-9 ._-]*",
-            normalized,
-            flags=re.IGNORECASE,
-        ):
-            return True
-        if re.search(
-            r"(?:customer|client|account|tenant|客戶|帳戶|日期|期間|"
-            r"past|last|previous|recent|today|yesterday|day|week|month|year|"
-            r"最近|過去|本期|上期|天|週|星期|月|年|到|至|從|自)",
-            normalized,
-            flags=re.IGNORECASE,
-        ) and not re.search(r"(?:ads?|sql|crm|seo|weather|天氣|名單)", normalized, flags=re.IGNORECASE):
-            return True
+        return bool(
+            self._customer_qualifier_pattern.fullmatch(normalized)
+            or self._period_qualifier_pattern.fullmatch(normalized)
+        )
+
+    def _has_catalog_match(
+        self,
+        request: str,
+        candidates: list[dict[str, Any]],
+    ) -> bool:
+        """Require catalog-derived evidence beyond a fuzzy single-token hit."""
+
+        request_compact = self._compact(request)
+        request_tokens = set(re.findall(r"[a-z0-9]+", request.casefold()))
+        request_chinese_terms = re.findall(r"[\u3400-\u9fff]{2,}", request)
+        for candidate in candidates:
+            terms = [
+                candidate["metric_id"],
+                candidate["label"],
+                candidate["main_metric"],
+                *(
+                    value
+                    for dimension in candidate["dimensions"]
+                    for value in (dimension["dimension_id"], dimension["label"])
+                ),
+            ]
+            for term in terms:
+                compact_term = self._compact(term)
+                if len(compact_term) >= 2 and compact_term in request_compact:
+                    return True
+                if any(
+                    chinese_term in compact_term
+                    for chinese_term in request_chinese_terms
+                ):
+                    return True
+
+                term_tokens = [
+                    token
+                    for token in re.findall(r"[a-z0-9]+", term.casefold())
+                    if token not in {"by", "count"} and len(token) >= 3
+                ]
+                if len(term_tokens) >= 2 and set(term_tokens).issubset(request_tokens):
+                    return True
         return False
+
+    @staticmethod
+    def _compact(value: str) -> str:
+        return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", value.casefold())
 
     def _resolution(
         self,
