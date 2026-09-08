@@ -574,6 +574,139 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "mixed_comparison_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions compared to email open rate",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_compare_to_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "Compare GA4 sessions to email open rate",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_comparison_with_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "Compare GA4 sessions in comparison with email open rate",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_chinese_comparison_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "GA4 工作階段相較於電子報開信率",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_source_dimension_alias",
+    "operation": "capability_lookup",
+    "request": "Show GA4 source",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_medium_dimension_alias",
+    "operation": "capability_lookup",
+    "request": "Show GA4 medium",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_campaign_dimension_alias",
+    "operation": "capability_lookup",
+    "request": "Show GA4 campaign",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "sessions_by_campaign",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_device_dimension_alias",
+    "operation": "capability_lookup",
+    "request": "Show GA4 device",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "sessions_by_device",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_sessions_with_source_dimension",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions with source",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_ads_attributed_conversions",
+    "operation": "capability_lookup",
+    "request": "Show GA4 conversions from Google Ads",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "attributed_conversions_by_source",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_chinese_ads_attributed_conversions",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 來自 Google Ads 的轉換",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "attributed_conversions_by_source",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_ads_attribution_does_not_hide_roas",
+    "operation": "capability_lookup",
+    "request": "Show GA4 conversions from Google Ads and ROAS",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_ads_attribution_does_not_hide_clicks",
+    "operation": "capability_lookup",
+    "request": "Show GA4 conversions from Google Ads clicks",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_engagement_not_split_on_chinese_character",
+    "operation": "capability_lookup",
+    "request": "GA4 參與度",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "engagement",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_ads_descriptor_ga4_sessions",
+    "operation": "capability_lookup",
+    "request": "Don't query Google Ads spend, show GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_weather_descriptor_ga4_sessions",
+    "operation": "capability_lookup",
+    "request": "Don't use weather data; show GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "negated_external_preserves_destructive_request",
     "operation": "capability_lookup",
     "request": "不要查 Google Ads 請刪除資料",

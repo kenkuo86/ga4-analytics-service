@@ -114,7 +114,7 @@ Dependencies: None
 
 ### Phase 5: capability preflight and explicit AI boundaries
 
-Status: Done
+Status: Todo
 
 Dependencies: None. Recommended after Phase 4 because both are likely to modify `main.py`, MCP error handling, and query tests.
 

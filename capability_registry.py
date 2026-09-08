@@ -150,12 +150,27 @@ class CapabilityRegistry:
     def __init__(self, catalog: SemanticCatalog):
         self.catalog = catalog
         self.version = CAPABILITY_REGISTRY_VERSION
-        ads_platform = (
-            r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
-        )
+        ads_platform = r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
         ads_native_metric = (
             r"(?:廣告|成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|"
             r"ctr|clicks?|impressions?|conversions?|曝光|點擊|轉換)"
+        )
+        self._ads_exclusive_metric_pattern = re.compile(
+            r"(?:成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|ctr|"
+            r"clicks?|impressions?|曝光|點擊)"
+        )
+        ga4_source = r"(?:ga\s*4|google\s*analytics)"
+        ga4_attribution_metric = (
+            r"(?:sessions?|users?|conversions?|revenue|工作階段|使用者|轉換|收益)"
+        )
+        attribution_connector = r"(?:from|by|attributed\s+to|來自|來源|歸因(?:於|到)?)"
+        self._explicit_ga4_ads_attribution_pattern = re.compile(
+            rf"{ga4_source}(?:"
+            rf".{{0,32}}{ga4_attribution_metric}.{{0,12}}"
+            rf"{attribution_connector}.{{0,12}}{ads_platform}|"
+            rf".{{0,12}}{attribution_connector}.{{0,12}}{ads_platform}"
+            rf".{{0,12}}{ga4_attribution_metric}"
+            rf")"
         )
         self.unsupported_intents = (
             UnsupportedIntent(
@@ -230,8 +245,12 @@ class CapabilityRegistry:
                     ),
                     re.compile(r"(?<![a-z])raw\s+sql(?![a-z])"),
                     re.compile(r"(?:寫|產生|生成).{0,8}sql"),
-                    re.compile(r"(?:執行|run).{0,12}(?:raw|custom|任意|自訂).{0,8}(?:sql|query)"),
-                    re.compile(r"(?<![a-z])(?:run|execute).{0,12}(?:sql|bigquery)(?![a-z])"),
+                    re.compile(
+                        r"(?:執行|run).{0,12}(?:raw|custom|任意|自訂).{0,8}(?:sql|query)"
+                    ),
+                    re.compile(
+                        r"(?<![a-z])(?:run|execute).{0,12}(?:sql|bigquery)(?![a-z])"
+                    ),
                     re.compile(r"(?:執行|run)\s+(?:select|with)\b"),
                     re.compile(r"\bselect\s+\*"),
                     re.compile(r"\bselect\b.{0,120}\bfrom\b"),
@@ -280,7 +299,6 @@ class CapabilityRegistry:
         )
 
         self._explicit_ga4_pattern = re.compile(r"ga\s*4|google\s*analytics")
-        ga4_source = r"(?:ga\s*4|google\s*analytics)"
         ga4_lead_metric = (
             r"(?:generate[_\s-]?leads?|lead(?:\s+(?:conversions?|events?))?|"
             r"名單(?:轉換)?(?:事件|次數))"
@@ -300,6 +318,22 @@ class CapabilityRegistry:
             r"(?:不要|不用|不需要|無需|別|不是|排除|do\s+not|don['’]?t|dont)"
             r"\s*(?:(?:查|看|分析|使用)|(?:query|use|include))?\s*"
             rf"(?:{external_object})"
+            r"(?:\s*(?:data|metrics?|performance|spend|cost|cpc|cpm|roas|ctr|"
+            r"clicks?|impressions?|conversions?|ranking|records?|list|"
+            r"資料|指標|成效|花費|費用|成本|曝光|點擊|轉換|排名|清單|列表))?"
+        )
+        clause_separator = (
+            r"[，,。；;]+|"
+            r"(?<![a-z])(?:and|but|plus|then|with|versus|vs\.?|to|against)"
+            r"(?![a-z])|"
+            r"(?<![a-z])(?:compared\s+(?:to|with)|in\s+comparison\s+(?:to|with))"
+            r"(?![a-z])|"
+            r"(?:以及|並且|同時|加上|然後|再查|相較於|相較|相比於|相比|對比|(?<!參)與|和|跟)"
+        )
+        self._clause_separator_pattern = re.compile(clause_separator)
+        self._capturing_clause_separator_pattern = re.compile(rf"({clause_separator})")
+        self._trailing_clause_separator_pattern = re.compile(
+            rf"(?:{clause_separator})\s*$"
         )
         self._customer_qualifier_pattern = re.compile(
             r"(?:for\s+[a-z0-9][a-z0-9 ._-]*|"
@@ -401,8 +435,20 @@ class CapabilityRegistry:
             normalized_request
         )
         is_ga4_lead_metric = ga4_lead_metric_match is not None
+        ga4_ads_attribution_match = self._explicit_ga4_ads_attribution_pattern.search(
+            normalized_request
+        )
+        is_ga4_ads_attribution = ga4_ads_attribution_match is not None
         for intent in self.unsupported_intents:
             intent_request = normalized_request
+            if (
+                intent.intent_id == "advertising_data"
+                and is_ga4_ads_attribution
+                and not self._ads_exclusive_metric_pattern.search(intent_request)
+            ):
+                intent_request = self._explicit_ga4_ads_attribution_pattern.sub(
+                    " ", intent_request
+                )
             if intent.intent_id == "crm" and is_ga4_lead_metric:
                 intent_request = self._explicit_ga4_lead_metric_pattern.sub(
                     " ", normalized_request
@@ -442,11 +488,14 @@ class CapabilityRegistry:
             catalog_query = normalized_request
             if is_ga4_lead_metric:
                 catalog_query = f"{catalog_query} generate_lead"
+            if is_ga4_ads_attribution:
+                catalog_query = f"{catalog_query} attributed conversions source"
             search_result = self.catalog.search(catalog_query, limit=10)
         else:
             search_result = {"metrics": []}
         if search_result["metrics"] and (
             is_ga4_lead_metric
+            or is_ga4_ads_attribution
             or self._has_catalog_match(normalized_request, search_result["metrics"])
         ):
             return self._resolution(
@@ -472,30 +521,17 @@ class CapabilityRegistry:
     def _affirmative_request(self, request: str) -> str:
         """Remove only explicitly negated external-source spans."""
 
-        clauses = re.split(
-            r"([，,。；;]+|(?<![a-z])(?:and|but|plus|then)(?![a-z])|"
-            r"(?:以及|並且|同時|加上|然後|再查|與|和))",
-            request,
-        )
+        clauses = self._capturing_clause_separator_pattern.split(request)
         without_exclusions = [
             (
                 self._negated_external_pattern.sub(" ", clause, count=1)
-                if not re.fullmatch(
-                    r"[，,。；;]+|(?<![a-z])(?:and|but|plus|then)(?![a-z])|"
-                    r"(?:以及|並且|同時|加上|然後|再查|與|和)",
-                    clause,
-                )
+                if not self._clause_separator_pattern.fullmatch(clause)
                 else clause
             )
             for clause in clauses
         ]
         result = " ".join(without_exclusions)
-        result = re.sub(
-            r"(?:(?<![a-z])(?:and|but|plus|then)(?![a-z])|"
-            r"(?:以及|並且|同時|加上|然後|再查|與|和))\s*$",
-            "",
-            result,
-        )
+        result = self._trailing_clause_separator_pattern.sub("", result)
         return result.strip(" ，,。；;")
 
     def _unresolved_mixed_clause(self, request: str) -> str | None:
@@ -505,11 +541,7 @@ class CapabilityRegistry:
             return None
         clauses = [
             clause.strip()
-            for clause in re.split(
-                r"[，,。；;]+|(?<![a-z])(?:and|plus|with|then)(?![a-z])|"
-                r"(?:以及|並且|同時|加上|然後|再查|與|和)",
-                request,
-            )
+            for clause in self._clause_separator_pattern.split(request)
             if clause.strip()
         ]
         if len(clauses) < 2:
@@ -541,6 +573,18 @@ class CapabilityRegistry:
 
         request_compact = self._compact(request)
         request_tokens = set(re.findall(r"[a-z0-9]+", request.casefold()))
+        request_signal_tokens = request_tokens - {
+            "analytics",
+            "breakdown",
+            "by",
+            "ga4",
+            "google",
+            "me",
+            "of",
+            "please",
+            "show",
+            "the",
+        }
         request_chinese_terms = re.findall(r"[\u3400-\u9fff]{2,}", request)
         for candidate in candidates:
             terms = [
@@ -569,6 +613,30 @@ class CapabilityRegistry:
                     if token not in {"by", "count"} and len(token) >= 3
                 ]
                 if len(term_tokens) >= 2 and set(term_tokens).issubset(request_tokens):
+                    return True
+
+            for dimension in candidate["dimensions"]:
+                dimension_tokens = {
+                    token
+                    for token in re.findall(
+                        r"[a-z0-9]+", dimension["dimension_id"].casefold()
+                    )
+                    if token
+                    not in {
+                        "category",
+                        "event",
+                        "first",
+                        "flow",
+                        "label",
+                        "page",
+                        "session",
+                        "traffic",
+                    }
+                    and len(token) >= 3
+                }
+                if request_signal_tokens and request_signal_tokens.issubset(
+                    dimension_tokens
+                ):
                     return True
         return False
 
