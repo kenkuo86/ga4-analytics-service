@@ -334,7 +334,8 @@ class CapabilityRegistry:
             r"(?![a-z])|"
             r"(?<![a-z])(?:compared\s+(?:to|with)|in\s+comparison\s+(?:to|with))"
             r"(?![a-z])|"
-            r"(?:以及|並且|同時|加上|然後|再查|相較於|相較|相比於|相比|對比|(?<!參)與|和|跟)"
+            r"(?:以及|並且|同時|加上|然後|再查|相較於|相較|相比於|相比|對比|(?<!參)與)|"
+            r"\s+[和跟]\s+"
         )
         self._clause_separator_pattern = re.compile(clause_separator)
         self._capturing_clause_separator_pattern = re.compile(rf"({clause_separator})")
@@ -550,7 +551,10 @@ class CapabilityRegistry:
     def _unresolved_mixed_clause(self, request: str) -> str | None:
         """Return the first affirmative mixed clause not covered by GA4 metadata."""
 
-        if not self._explicit_ga4_pattern.search(request):
+        if not (
+            self._explicit_ga4_pattern.search(request)
+            or re.search(r"流量摘要|traffic\s+summary", request)
+        ):
             return None
         clauses = [
             clause.strip()
@@ -563,10 +567,90 @@ class CapabilityRegistry:
         for clause in clauses:
             if self._is_query_qualifier_clause(clause):
                 continue
+            if re.search(r"流量摘要|traffic\s+summary", clause):
+                continue
             candidates = self.catalog.search(clause, limit=10)["metrics"]
-            if not candidates or not self._has_catalog_match(clause, candidates):
+            if not candidates or not self._has_complete_catalog_match(
+                clause, candidates
+            ):
                 return clause
         return None
+
+    def _has_complete_catalog_match(
+        self,
+        request: str,
+        candidates: list[dict[str, Any]],
+    ) -> bool:
+        """Require every meaningful English token in a mixed clause to be known."""
+
+        if not self._has_catalog_match(request, candidates):
+            return False
+
+        ignored_tokens = {
+            "a",
+            "an",
+            "analysis",
+            "analytics",
+            "analyze",
+            "breakdown",
+            "by",
+            "check",
+            "compare",
+            "data",
+            "day",
+            "days",
+            "for",
+            "from",
+            "ga4",
+            "get",
+            "give",
+            "google",
+            "last",
+            "me",
+            "metric",
+            "metrics",
+            "month",
+            "months",
+            "of",
+            "past",
+            "please",
+            "previous",
+            "query",
+            "recent",
+            "report",
+            "run",
+            "show",
+            "the",
+            "this",
+            "today",
+            "week",
+            "weeks",
+            "year",
+            "years",
+            "yesterday",
+        }
+        known_ga4_values = {"direct", "natural", "organic", "paid", "referral"}
+        request_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", request.casefold())
+            if token not in ignored_tokens
+        }
+        catalog_tokens: set[str] = set()
+        for candidate in candidates:
+            terms = [
+                candidate["metric_id"],
+                candidate["label"],
+                candidate["main_metric"],
+                *(
+                    value
+                    for dimension in candidate["dimensions"]
+                    for value in (dimension["dimension_id"], dimension["label"])
+                ),
+            ]
+            for term in terms:
+                catalog_tokens.update(re.findall(r"[a-z0-9]+", term.casefold()))
+
+        return request_tokens.issubset(catalog_tokens | known_ga4_values)
 
     def _is_query_qualifier_clause(self, clause: str) -> bool:
         """Recognize customer and period context, not a second analysis request."""

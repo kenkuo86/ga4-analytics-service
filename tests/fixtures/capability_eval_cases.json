@@ -607,6 +607,46 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "mixed_traffic_summary_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "Show traffic summary and email open rate",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_email_sessions",
+    "operation": "capability_lookup",
+    "request": "Show GA4 users and email sessions",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_tiktok_sessions",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions and TikTok sessions",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_stripe_revenue",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions and Stripe revenue",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "chinese_customer_name_with_conjunction_character",
+    "operation": "capability_lookup",
+    "request": "客戶：大和公司，查 GA4 工作階段",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "mixed_comparison_email_open_rate",
     "operation": "capability_lookup",
     "request": "Show GA4 sessions compared to email open rate",
