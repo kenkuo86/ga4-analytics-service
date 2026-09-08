@@ -10,6 +10,7 @@ import google.auth
 
 from fastapi import Depends, FastAPI, HTTPException
 
+from capability_registry import capability_registry
 from oauth_auth import require_rest_oauth
 from query_policy import PreparedQuery, QueryPolicyError, query_policy
 from semantic_catalog import SemanticCatalogError, semantic_catalog
@@ -248,6 +249,12 @@ def search_ga4_metric_catalog(
     )
 
 
+def get_ga4_capability_resolution(request: str | None = None) -> dict[str, Any]:
+    """Resolve connector capabilities from local versioned metadata only."""
+
+    return capability_registry.resolve(request)
+
+
 def _serialize_bigquery_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -306,6 +313,7 @@ def query_ga4_semantic_metrics(
             normalized_metric_ids.append(normalized)
 
     parsed_start, parsed_end = query_policy.validate_date_range(start_date, end_date)
+    semantic_catalog.find_publishable_profiles(normalized_metric_ids)
     result_limit = max(1, min(int(limit), 200))
     client = get_bigquery_client()
     tenant = get_tenant_config(client, customer_name)

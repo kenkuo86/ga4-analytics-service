@@ -1,5 +1,6 @@
 import json
 
+from capability_registry import SERVER_INSTRUCTIONS, capability_registry
 import uvicorn
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server import MCPServer
@@ -11,6 +12,7 @@ from main import app as api_app
 from main import (
     TenantResolutionError,
     get_available_customers,
+    get_ga4_capability_resolution,
     get_customer_status,
     get_traffic_summary,
     query_ga4_semantic_metrics,
@@ -43,35 +45,7 @@ if oauth_runtime.config is not None and oauth_runtime.provider is not None:
 
 mcp = MCPServer(
     "GA4 Analytics Service",
-    instructions="""
-This server resolves every customer name through the tenant registry. Users
-never need to know or provide tenant_id, project_id, or dataset_id. Use the
-customer name from the conversation in each tool call; tool results include
-data_source routing metadata when it is configured. Treat tenant_id,
-project_id, and dataset_id as internal metadata and do not show them in the
-answer unless the user explicitly asks for technical routing details.
-
-When the user asks which customers are available, call
-list_available_customers and present its customer names. Do not replace the
-customer list with a registry spreadsheet link.
-
-For analytics beyond traffic_summary, first use search_ga4_metrics to find the
-published metric IDs in the versioned semantic catalog, then call query_ga4
-with only those IDs. Catalog metrics may include source, medium, campaign,
-content, conversion, and ecommerce analyses. Never invent a metric ID or SQL.
-query_ga4 resolves ecommerce versus non-ecommerce from the tenant registry ec
-field; never ask the user to identify the site type. Never ask the user for a
-project ID or dataset ID to work around a missing capability.
-
-Each semantic metric result includes date_scope. If it is all_available_data,
-state that the metric definition is an all-data snapshot and do not describe it
-as limited to the requested period.
-
-This server does not provide ads, SEO keyword ranking, CRM, or arbitrary
-BigQuery access. Never present general knowledge or an inference as actual
-customer data, and never claim a catalog metric was queried unless a tool
-returned status ok.
-""".strip(),
+    instructions=SERVER_INSTRUCTIONS,
     **mcp_auth_kwargs,
 )
 
@@ -97,36 +71,18 @@ async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
-@mcp.tool()
+@mcp.tool(description=capability_registry.tool_description("customer_lookup"))
 def customer_lookup(customer_name: str) -> dict:
-    """
-    Check whether an exact customer name exists in the tenant registry.
-
-    Use this tool whenever the user asks whether a customer exists. This lookup
-    does not require access to the customer's GA4 dataset. A customer can exist
-    even when analytics_available is false. If the result is tenant_not_found,
-    do not claim that a similar customer exists and do not guess another name.
-    When configured, data_source contains the project_id and dataset_id for
-    internal routing. Never ask the user to provide either identifier.
-    """
+    """Run the customer lookup described by the capability registry."""
     try:
         return get_customer_status(customer_name)
     except (TenantResolutionError, QueryPolicyError) as error:
         return error.as_result()
 
 
-@mcp.tool()
+@mcp.tool(description=capability_registry.tool_description("list_available_customers"))
 def list_available_customers() -> dict:
-    """
-    List customer names currently available for GA4 traffic summary queries.
-
-    Use this tool when the user asks which customers or accounts can be
-    queried. It returns only registry entries that are active, have a
-    configured project, have a non-empty customer name, and can be uniquely
-    resolved by that name. Present the customer names directly. Do not expose
-    tenant IDs or project IDs, and do not ask the user to inspect the registry
-    spreadsheet instead.
-    """
+    """List customers using the capability registry's public contract."""
     try:
         return get_available_customers()
     except QueryPolicyError as error:
@@ -138,22 +94,20 @@ def list_available_customers() -> dict:
         }
 
 
-@mcp.tool()
+@mcp.tool(description=capability_registry.tool_description("get_ga4_capabilities"))
+def get_ga4_capabilities(request: str | None = None) -> dict:
+    """Resolve a request against local connector capability metadata."""
+
+    return get_ga4_capability_resolution(request)
+
+
+@mcp.tool(description=capability_registry.tool_description("search_ga4_metrics"))
 def search_ga4_metrics(
     query: str,
     profile: str | None = None,
     limit: int = 10,
 ) -> dict:
-    """
-    Search the versioned GA4 semantic catalog for supported metric IDs.
-
-    Use this before query_ga4 whenever the user asks for an analysis beyond the
-    fixed traffic summary or uses a natural-language metric name. The search
-    covers metric labels, report context, and dimensions such as source,
-    medium, campaign, date, device, geography, page, and item. Pass profile as
-    ecommerce or non_ecommerce only when the website type is already known.
-    This tool reads definitions only; it does not query customer data.
-    """
+    """Search metrics using the capability registry's public contract."""
     try:
         return search_ga4_metric_catalog(
             query=query,
@@ -164,7 +118,7 @@ def search_ga4_metrics(
         return error.as_result()
 
 
-@mcp.tool()
+@mcp.tool(description=capability_registry.tool_description("query_ga4"))
 def query_ga4(
     customer_name: str,
     metric_ids: list[str],
@@ -172,19 +126,7 @@ def query_ga4(
     end_date: str,
     limit: int = 50,
 ) -> dict:
-    """
-    Query one to five published GA4 semantic metrics for a customer and period.
-
-    metric_ids must come from search_ga4_metrics; never invent IDs. The server
-    resolves project_id, dataset_id, and the ecommerce profile from the tenant
-    registry, compiles only catalog-approved SQL, and never accepts raw table,
-    column, filter, group by, profile, or SQL input. Present only rows returned
-    with status ok and retain routing metadata as internal context. Respect
-    each metric's date_scope: do not describe an all_available_data result as
-    limited to start_date and end_date. The server enforces its configured date,
-    per-job, request-total, timeout, and daily BigQuery cost limits; relay a
-    structured limit error instead of retrying around it.
-    """
+    """Query metrics using the capability registry's public contract."""
     try:
         return query_ga4_semantic_metrics(
             customer_name=customer_name,
@@ -197,28 +139,13 @@ def query_ga4(
         return error.as_result()
 
 
-@mcp.tool()
+@mcp.tool(description=capability_registry.tool_description("traffic_summary"))
 def traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
 ) -> dict:
-    """
-    Get GA4 traffic summary by the customer's registered name and date range.
-
-    Returns current period, previous period, and percentage change for:
-    total sessions, total users, new users, and returning users.
-
-    Always use the customer name stated by the user. If the result status is
-    tenant_not_found, tell the user that the customer does not exist in the
-    tenant registry. If it is tenant_inactive, explain that the customer exists
-    but is not currently available. Never guess a different customer. The
-    result includes data_source routing metadata; retain it as context and
-    never ask the user for project_id or dataset_id. For supported follow-up
-    analyses such as source, medium, or campaign, use search_ga4_metrics and
-    query_ga4 rather than claiming arbitrary BigQuery access. The same shared
-    date and BigQuery cost policy applies to this tool and the REST endpoint.
-    """
+    """Run the traffic report described by the capability registry."""
     try:
         return get_traffic_summary(
             customer_name=customer_name,
