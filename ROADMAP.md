@@ -136,11 +136,18 @@ Dependencies: None. Recommended after Phase 4 because both are likely to modify 
    - 不存在的 metric：在 tenant data query 前拒絕。
    - 超出日期或權限範圍的要求：在查詢前拒絕。
 
+PoC 邊界決策：capability intent resolution 採 deterministic metadata、規則與
+versioned eval cases，不以窮舉或正確分類所有自然語言排列為目標。未列入規則的外部來源限定詞、
+複合句或新措辭可能被判成 `needs_clarification`，或只解析出其中可支援的 GA4 部分；這是目前
+owner 接受的呈現／tool-choice 風險。真正的 server-side 安全邊界仍由 catalog publishability、
+tenant routing、唯讀 SQL 與 query policy 負責，不能因 intent resolver 的判斷而執行外部資料查詢、
+任意 SQL 或未知 metric。
+
 #### Acceptance criteria
 
-- 已知不支援需求不會產生 tenant registry 或 tenant data query。
+- Versioned eval cases 中明確列出的不支援需求不會產生 tenant registry 或 tenant data query。
 - Server-side validation 可以阻止模型略過 capability preflight 後直接執行未知 metric。
-- 對話 eval 能分辨「不支援」、「需要釐清」及「可查詢」三種結果。
+- Versioned 對話 eval cases 能分辨「不支援」、「需要釐清」及「可查詢」三種結果。
 
 實作備註：repository 內的 deterministic eval fixture 會驗證三種 resolution、next_action
 及 BigQuery 呼叫邊界；實際 Claude connector 的 host model tool choice 與回答措辭仍需在部署後
