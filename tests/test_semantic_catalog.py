@@ -74,6 +74,19 @@ class SemanticCatalogTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "semantic_profile_required")
 
+    def test_publishability_preflight_rejects_unknown_metric_locally(self):
+        with self.assertRaises(SemanticCatalogError) as raised:
+            semantic_catalog.find_publishable_profiles(["invented_roas"])
+
+        self.assertEqual(raised.exception.code, "unsupported_metric")
+
+    def test_publishability_preflight_finds_common_profiles(self):
+        profiles = semantic_catalog.find_publishable_profiles(
+            ["total_sessions", "total_users"]
+        )
+
+        self.assertEqual(profiles, ["non_ecommerce", "ecommerce"])
+
     def test_total_users_compiles_from_sessions_model(self):
         sql, _ = semantic_catalog.compile_sql(
             profile="non_ecommerce",

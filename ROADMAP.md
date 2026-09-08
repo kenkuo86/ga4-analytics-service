@@ -8,7 +8,7 @@
 - 由 tenant registry 解析正式客戶名稱、GA4 project 與 ecommerce profile；使用者不需要知道 `tenant_id`、`project_id` 或 `dataset_id`。
 - 可直接列出目前能查詢的客戶。
 - 透過 versioned semantic catalog 搜尋並執行核准的 GA4 指標，不接受任意 SQL。
-- 提供 `customer_lookup`、`list_available_customers`、`search_ga4_metrics`、`query_ga4` 與相容用的 `traffic_summary`。
+- 提供 `customer_lookup`、`list_available_customers`、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與相容用的 `traffic_summary`。
 - Cloud Run runtime service account 已具備目前 active tenants 的 dataset-level read access，query jobs 集中由 `ga4-reports-dev` 計費。
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
 - 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
@@ -136,11 +136,22 @@ Dependencies: None. Recommended after Phase 4 because both are likely to modify 
    - 不存在的 metric：在 tenant data query 前拒絕。
    - 超出日期或權限範圍的要求：在查詢前拒絕。
 
+PoC 邊界決策：capability intent resolution 採 deterministic metadata、規則與
+versioned eval cases，不以窮舉或正確分類所有自然語言排列為目標。未列入規則的外部來源限定詞、
+複合句或新措辭可能被判成 `needs_clarification`，或只解析出其中可支援的 GA4 部分；這是目前
+owner 接受的呈現／tool-choice 風險。真正的 server-side 安全邊界仍由 catalog publishability、
+tenant routing、唯讀 SQL 與 query policy 負責，不能因 intent resolver 的判斷而執行外部資料查詢、
+任意 SQL 或未知 metric。
+
 #### Acceptance criteria
 
-- 已知不支援需求不會產生 tenant registry 或 tenant data query。
+- Versioned eval cases 中明確列出的不支援需求不會產生 tenant registry 或 tenant data query。
 - Server-side validation 可以阻止模型略過 capability preflight 後直接執行未知 metric。
-- 對話 eval 能分辨「不支援」、「需要釐清」及「可查詢」三種結果。
+- Versioned 對話 eval cases 能分辨「不支援」、「需要釐清」及「可查詢」三種結果。
+
+實作備註：repository 內的 deterministic eval fixture 會驗證三種 resolution、next_action
+及 BigQuery 呼叫邊界；實際 Claude connector 的 host model tool choice 與回答措辭仍需在部署後
+以相同案例進行對話驗收。
 
 ### Phase 6: query provenance and auditability
 

@@ -5,8 +5,8 @@
 - MCP Streamable HTTP endpoint：`/mcp`（同時保留 `/mcp/` 相容路由）
 - REST endpoint：`/traffic-summary`
 
-服務提供 `customer_lookup`、`list_available_customers`、`search_ga4_metrics`、
-`query_ga4` 與相容用的 `traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部
+服務提供 `customer_lookup`、`list_available_customers`、`get_ga4_capabilities`、
+`search_ga4_metrics`、`query_ga4` 與相容用的 `traffic_summary`。使用者以 tenant registry 中的正式客戶名稱查詢，不需要知道內部
 `tenant_id`。`customer_lookup` 只確認 registry 狀態，不依賴客戶 GA4 dataset
 權限；`list_available_customers` 回傳目前可唯一解析且已設定 GA4 project 的 active
 客戶名稱；`search_ga4_metrics` 搜尋已發布的指標定義；`query_ga4` 依 catalog 中的固定
@@ -25,6 +25,47 @@ dataset，供 host model 保留為內部 routing context；使用者不需要知
 識別資訊，回覆時也不應主動顯示。source／medium／campaign 等分析由 semantic
 catalog 決定可用指標與查詢方法；不在 catalog 的問題會回傳 `unsupported_metric`，
 不得要求使用者提供 project、dataset 或 SQL 來繞過能力邊界。
+
+## Capability preflight
+
+`capability_registry.py` 是 connector 能力邊界、公開 tool inventory、server
+instructions 與 tool descriptions 的 versioned 單一來源。當資料來源或分析類型不明確
+時，先呼叫 `get_ga4_capabilities`；它只讀取本機 capability metadata 與 semantic
+catalog，不會建立 BigQuery client，也不會查詢 tenant registry 或 tenant data。
+
+Capability resolution 固定區分三種結果：
+
+- `supported`：明確要求 GA4 traffic summary，或同時指明 GA4 與分析 metric 且本機
+  catalog 有已發布候選，依 `next_action` 搜尋或查詢。模糊 catalog hit 本身不足以判定
+  supported。
+- `unsupported`：registry 規則明確認得的 Google Ads／Meta／Facebook 廣告成效、SEO
+  keyword ranking／Search Console、外部 CRM／名單／銷售管線、天氣等外部資料、任意
+  BigQuery／SQL 或資料修改。GA4 自身已發布的 `generate_lead`／名單轉換事件不屬於外部
+  CRM 資料。
+- `needs_clarification`：請求過於籠統或找不到明確的 GA4 metric，應先詢問指標或分析
+  維度，不查詢客戶資料。單獨的「流量」或「SEO 表現」屬於這一類。
+
+Resolver 只會移除明確否定的外部來源片段；例如「不要查 Google Ads，請查 GA4
+sessions」會解析 affirmative GA4 request，而不是因出現 Ads 字樣誤判為 unsupported。
+中英文否定及沒有標點的寫法採相同規則，否定片段後的 SQL 或破壞性要求仍會保留並拒絕。
+Versioned eval cases 中的 mixed request 會逐段檢查；但這個 PoC 的 deterministic
+resolver 不保證涵蓋所有自然語言排列。未列入規則的外部來源限定詞、複合句或新措辭可能
+誤判或只解析出可支援的 GA4 部分；這是已接受的 presentation／tool-choice limitation，
+不會擴張 server-side 可執行的資料來源、SQL、metric 或 tenant routing。
+
+`query_ga4` 保持原有 API，不要求 selection token。即使 host model 略過 catalog
+search，server 仍會先在本機確認所有 `metric_ids` 至少有一個共同的 published
+profile，通過後才建立 BigQuery client 及查詢 tenant registry。未知 metric、尚未發布
+的 conflict definition、沒有共同 profile 的組合，以及日期越界都不會觸發 registry 或
+tenant data query。Selection token 不是授權邊界；若未來需要追蹤兩階段選擇流程，仍
+不能取代 server-side catalog validation。
+
+Deterministic connector behavior cases 位於
+`tests/fixtures/capability_eval_cases.json`，覆蓋 Google／Meta／Facebook Ads、SEO、
+CRM／名單／銷售管線、SQL／write、否定及 mixed GA4 request、泛詞、GA4 自然流量、
+未知 metric 與日期越界。這些測試只驗證 server-side resolution 與 BigQuery 呼叫邊界，
+不能保證 host model 的 tool choice 或回答措辭；實際對話行為仍必須在部署後以 Claude
+connector eval 驗收。
 
 `traffic_summary` 成功結果固定使用 versioned report contract（目前為
 `report_schema_version=1.0.0`）。Host 必須依結果中的 `presentation` 呈現：使用
