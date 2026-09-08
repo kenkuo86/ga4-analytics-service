@@ -155,12 +155,15 @@ class CapabilityRegistry:
                 "advertising_data",
                 "Google Ads／Meta／Facebook 廣告資料",
                 (
-                    re.compile(r"(?<![a-z0-9])google\s*ads?(?![a-z0-9])"),
-                    re.compile(r"(?<![a-z0-9])meta\s*ads?(?![a-z0-9])"),
-                    re.compile(r"(?<![a-z0-9])facebook\s*ads?(?![a-z0-9])"),
                     re.compile(
-                        r"(?<![a-z0-9])(?:meta|facebook|fb)(?![a-z0-9]).{0,12}"
-                        r"(?:廣告|成效|performance)"
+                        r"(?<![a-z0-9])(?:google\s*ads?|meta\s*ads?|"
+                        r"facebook\s*ads?|fb\s*廣告)(?![a-z0-9]).{0,20}"
+                        r"(?:廣告|成效|花費|費用|成本|spend|cost|performance|"
+                        r"cpc|cpm|roas|曝光|點擊)"
+                    ),
+                    re.compile(
+                        r"(?:不要排除|不是不要|沒有說不要|没有说不要).{0,12}"
+                        r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
                     ),
                     re.compile(
                         r"(?:廣告|(?<![a-z])ads?(?![a-z])).{0,12}"
@@ -189,6 +192,10 @@ class CapabilityRegistry:
                         r"(?<![a-z])opportunit(?:y|ies)(?![a-z])"
                     ),
                     re.compile(
+                        r"(?:不要排除|不是不要|沒有說不要|没有说不要).{0,12}"
+                        r"(?:crm|salesforce|hubspot|客戶關係管理|銷售管線|名單|leads?)"
+                    ),
+                    re.compile(
                         r"(?:查|看|取得|匯出|我要).{0,8}"
                         r"(?:名單|(?<![a-z])leads?(?![a-z]))"
                     ),
@@ -214,8 +221,8 @@ class CapabilityRegistry:
                     ),
                     re.compile(r"(?<![a-z])raw\s+sql(?![a-z])"),
                     re.compile(r"(?:寫|產生|生成).{0,8}sql"),
-                    re.compile(r"(?:執行|run).{0,8}(?:sql|query)"),
-                    re.compile(r"(?<![a-z])execute\s+(?:sql|query)(?![a-z])"),
+                    re.compile(r"(?:執行|run).{0,12}(?:raw|custom|任意|自訂).{0,8}(?:sql|query)"),
+                    re.compile(r"(?<![a-z])(?:run|execute).{0,12}(?:sql|bigquery)(?![a-z])"),
                     re.compile(r"(?:執行|run)\s+(?:select|with)\b"),
                     re.compile(r"\bselect\s+\*"),
                     re.compile(r"\bselect\b.{0,120}\bfrom\b"),
@@ -233,7 +240,9 @@ class CapabilityRegistry:
                     re.compile(
                         r"(?:清空|抹除|清除|銷毀).{0,12}(?:資料|紀錄|記錄|table|表格)"
                     ),
-                    re.compile(r"\b(?:insert|update|delete|merge|drop|truncate)\b"),
+                    re.compile(r"\binsert\s+into\b|\bdelete\s+from\b|\bmerge\s+into\b"),
+                    re.compile(r"\bupdate\s+(?:table\s+)?[a-z_][a-z0-9_.]*\s+set\b"),
+                    re.compile(r"\bdrop\s+(?:table|view|dataset)\b|\btruncate\s+table\b"),
                     re.compile(
                         r"\b(?:erase|purge|wipe)\b.{0,24}"
                         r"\b(?:data|records?|rows?|table)\b"
@@ -471,11 +480,34 @@ class CapabilityRegistry:
             return None
 
         for clause in clauses:
+            if self._is_query_qualifier_clause(clause):
+                continue
             if not self._ga4_analysis_pattern.search(clause):
                 return clause
             if not self.catalog.search(clause, limit=1)["metrics"]:
                 return clause
         return None
+
+    @staticmethod
+    def _is_query_qualifier_clause(clause: str) -> bool:
+        """Recognize customer and period context, not a second analysis request."""
+
+        normalized = clause.strip()
+        if re.fullmatch(
+            r"(?:for|from|by)\s+[a-z0-9][a-z0-9 ._-]*",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            return True
+        if re.search(
+            r"(?:customer|client|account|tenant|客戶|帳戶|日期|期間|"
+            r"past|last|previous|recent|today|yesterday|day|week|month|year|"
+            r"最近|過去|本期|上期|天|週|星期|月|年|到|至|從|自)",
+            normalized,
+            flags=re.IGNORECASE,
+        ) and not re.search(r"(?:ads?|sql|crm|seo|weather|天氣|名單)", normalized, flags=re.IGNORECASE):
+            return True
+        return False
 
     def _resolution(
         self,

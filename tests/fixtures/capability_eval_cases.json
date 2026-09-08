@@ -147,6 +147,46 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "ga4_sessions_customer_qualifier",
+    "operation": "capability_lookup",
+    "request": "For ACME, show GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_sessions_period_qualifier",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions, past seven days",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_ads_attribution",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions from Google Ads campaigns",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_query_execution_request",
+    "operation": "capability_lookup",
+    "request": "Run a GA4 query for sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_update_status_request",
+    "operation": "capability_lookup",
+    "request": "Please update me on GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "unclear_analysis",
     "operation": "capability_lookup",
     "request": "分析客戶表現",
