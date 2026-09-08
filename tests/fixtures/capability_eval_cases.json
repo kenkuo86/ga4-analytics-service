@@ -24,6 +24,30 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "google_ads_generic_data",
+    "operation": "capability_lookup",
+    "request": "Google Ads data",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "google_ads_campaign_report",
+    "operation": "capability_lookup",
+    "request": "Show me a Google Ads campaign report",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "meta_ads_generic_report",
+    "operation": "capability_lookup",
+    "request": "Meta Ads report",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "meta_ads_conversions",
     "operation": "capability_lookup",
     "request": "Compare GA4 sessions and Meta Ads conversions",
@@ -660,6 +684,22 @@
     "request": "顯示 GA4 使用者與工作階段",
     "expected_resolution": "supported",
     "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_disjunction_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions or email open rate",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_chinese_disjunction_email_open_rate",
+    "operation": "capability_lookup",
+    "request": "顯示 GA4 工作階段或電子郵件開信率",
+    "expected_resolution": "needs_clarification",
+    "expected_reason_code": "unresolved_mixed_request",
     "expected_bigquery_calls": 0
   },
   {

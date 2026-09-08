@@ -153,11 +153,13 @@ class CapabilityRegistry:
         ads_platform = r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
         ads_native_metric = (
             r"(?:廣告|成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|"
-            r"ctr|clicks?|impressions?|conversions?|曝光|點擊|轉換)"
+            r"ctr|clicks?|impressions?|conversions?|campaign\s+reports?|data|reports?|"
+            r"曝光|點擊|轉換|資料|報表|報告)"
         )
         self._ads_exclusive_metric_pattern = re.compile(
             r"(?:成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|ctr|"
-            r"clicks?|impressions?|曝光|點擊)"
+            r"clicks?|impressions?|campaign\s+reports?|data|reports?|"
+            r"曝光|點擊|資料|報表|報告)"
         )
         ga4_source = r"(?:ga\s*4|google\s*analytics)"
         ga4_attribution_metric = (
@@ -343,11 +345,11 @@ class CapabilityRegistry:
         )
         clause_separator = (
             r"[，,。；;]+|"
-            r"(?<![a-z])(?:and|but|plus|then|with|versus|vs\.?|to|against)"
+            r"(?<![a-z])(?:and|but|or|plus|then|with|versus|vs\.?|to|against)"
             r"(?![a-z])|"
             r"(?<![a-z])(?:compared\s+(?:to|with)|in\s+comparison\s+(?:to|with))"
             r"(?![a-z])|"
-            r"(?:以及|並且|同時|加上|然後|再查|相較於|相較|相比於|相比|對比|(?<!參)與)|"
+            r"(?:以及|並且|同時|加上|然後|再查|或者|或|相較於|相較|相比於|相比|對比|(?<!參)與)|"
             r"\s+[和跟]\s+"
         )
         self._clause_separator_pattern = re.compile(clause_separator)
