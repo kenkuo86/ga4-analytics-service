@@ -286,6 +286,15 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "ga4_chinese_site_search_keywords",
+    "operation": "capability_lookup",
+    "request": "請查 GA4 站內搜尋關鍵字",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_candidate_metric_id": "search_terms_count",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "generic_traffic",
     "operation": "capability_lookup",
     "request": "流量",
@@ -481,6 +490,30 @@
     "case_id": "mixed_ga4_sessions_and_download_leads",
     "operation": "capability_lookup",
     "request": "GA4 sessions and download leads",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_lead_list_is_not_metric_exception",
+    "operation": "capability_lookup",
+    "request": "Show GA4 lead list",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_export_leads_is_not_metric_exception",
+    "operation": "capability_lookup",
+    "request": "Export GA4 leads",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "crm",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "ga4_lead_records_is_not_metric_exception",
+    "operation": "capability_lookup",
+    "request": "Show GA4 lead records",
     "expected_resolution": "unsupported",
     "expected_reason_code": "crm",
     "expected_bigquery_calls": 0

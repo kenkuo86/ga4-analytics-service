@@ -172,6 +172,10 @@ class CapabilityRegistry:
             rf".{{0,12}}{ga4_attribution_metric}"
             rf")"
         )
+        self._explicit_ga4_site_search_pattern = re.compile(
+            rf"{ga4_source}.{{0,20}}(?:站內搜尋(?:關鍵字|字詞)|site\s+search\s+terms?|"
+            r"search\s+terms?)"
+        )
         self.unsupported_intents = (
             UnsupportedIntent(
                 "advertising_data",
@@ -200,7 +204,9 @@ class CapabilityRegistry:
                 "seo_keyword_ranking",
                 "SEO keyword ranking",
                 (
-                    re.compile(r"(?:seo|搜尋).{0,12}(?:關鍵字|keyword|排名|ranking)"),
+                    re.compile(
+                        r"(?:seo|搜尋引擎).{0,12}(?:關鍵字|keyword|排名|ranking)"
+                    ),
                     re.compile(r"(?:關鍵字|keyword).{0,12}(?:排名|ranking)"),
                     re.compile(r"search\s*console"),
                 ),
@@ -300,7 +306,7 @@ class CapabilityRegistry:
 
         self._explicit_ga4_pattern = re.compile(r"ga\s*4|google\s*analytics")
         ga4_lead_metric = (
-            r"(?:generate[_\s-]?leads?|lead(?:\s+(?:conversions?|events?))?|"
+            r"(?:generate[_\s-]?leads?|lead\s+(?:conversions?|events?)|"
             r"名單(?:轉換)?(?:事件|次數))"
         )
         self._explicit_ga4_lead_metric_pattern = re.compile(
@@ -439,6 +445,10 @@ class CapabilityRegistry:
             normalized_request
         )
         is_ga4_ads_attribution = ga4_ads_attribution_match is not None
+        is_ga4_site_search = (
+            self._explicit_ga4_site_search_pattern.search(normalized_request)
+            is not None
+        )
         for intent in self.unsupported_intents:
             intent_request = normalized_request
             if (
@@ -490,12 +500,15 @@ class CapabilityRegistry:
                 catalog_query = f"{catalog_query} generate_lead"
             if is_ga4_ads_attribution:
                 catalog_query = f"{catalog_query} attributed conversions source"
+            if is_ga4_site_search:
+                catalog_query = f"{catalog_query} search_terms_count search_term"
             search_result = self.catalog.search(catalog_query, limit=10)
         else:
             search_result = {"metrics": []}
         if search_result["metrics"] and (
             is_ga4_lead_metric
             or is_ga4_ads_attribution
+            or is_ga4_site_search
             or self._has_catalog_match(normalized_request, search_result["metrics"])
         ):
             return self._resolution(
