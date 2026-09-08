@@ -8,7 +8,7 @@
 - 由 tenant registry 解析正式客戶名稱、GA4 project 與 ecommerce profile；使用者不需要知道 `tenant_id`、`project_id` 或 `dataset_id`。
 - 可直接列出目前能查詢的客戶。
 - 透過 versioned semantic catalog 搜尋並執行核准的 GA4 指標，不接受任意 SQL。
-- 提供 `customer_lookup`、`list_available_customers`、`search_ga4_metrics`、`query_ga4` 與相容用的 `traffic_summary`。
+- 提供 `customer_lookup`、`list_available_customers`、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與相容用的 `traffic_summary`。
 - Cloud Run runtime service account 已具備目前 active tenants 的 dataset-level read access，query jobs 集中由 `ga4-reports-dev` 計費。
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
 - 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
@@ -114,7 +114,7 @@ Dependencies: None
 
 ### Phase 5: capability preflight and explicit AI boundaries
 
-Status: Todo
+Status: Done
 
 Dependencies: None. Recommended after Phase 4 because both are likely to modify `main.py`, MCP error handling, and query tests.
 
@@ -141,6 +141,10 @@ Dependencies: None. Recommended after Phase 4 because both are likely to modify 
 - 已知不支援需求不會產生 tenant registry 或 tenant data query。
 - Server-side validation 可以阻止模型略過 capability preflight 後直接執行未知 metric。
 - 對話 eval 能分辨「不支援」、「需要釐清」及「可查詢」三種結果。
+
+實作備註：repository 內的 deterministic eval fixture 會驗證三種 resolution、next_action
+及 BigQuery 呼叫邊界；實際 Claude connector 的 host model tool choice 與回答措辭仍需在部署後
+以相同案例進行對話驗收。
 
 ### Phase 6: query provenance and auditability
 

@@ -111,6 +111,30 @@ class PhaseFiveCapabilityRegistryTests(unittest.TestCase):
                     case["expected_bigquery_calls"],
                 )
 
+    def test_connector_eval_contract_maps_resolution_to_next_action(self):
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        capability_cases = [
+            case for case in cases if case["operation"] == "capability_lookup"
+        ]
+
+        for case in capability_cases:
+            with self.subTest(case=case["case_id"]):
+                result = capability_registry.resolve(case["request"])
+                resolution = case["expected_resolution"]
+                action = result["next_action"]
+
+                if resolution == "supported":
+                    self.assertEqual(action["type"], "call_tool")
+                    self.assertIn(
+                        action["tool"],
+                        {"search_ga4_metrics", "traffic_summary"},
+                    )
+                elif resolution == "unsupported":
+                    self.assertEqual(action, {"type": "explain_boundary"})
+                else:
+                    self.assertEqual(action["type"], "ask_user")
+                    self.assertTrue(action["question"])
+
     def test_profile_mismatch_reads_registry_but_not_tenant_data(self):
         import main
 
