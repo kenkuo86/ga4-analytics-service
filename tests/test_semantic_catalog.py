@@ -291,6 +291,53 @@ class SemanticCatalogTests(unittest.TestCase):
         self.assertEqual(provenance["queries"][0]["job_id"], "job-failed")
         self.assertEqual(provenance["queries"][0]["bytes_billed"], 5_000_000)
 
+    def test_failed_metric_row_iteration_keeps_returned_job_metadata(self):
+        class FailingRows:
+            def __init__(self):
+                self.returned_first_row = False
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if not self.returned_first_row:
+                    self.returned_first_row = True
+                    return {"total_sessions": 123}
+                raise RuntimeError("next page failed")
+
+        registry_job = Mock()
+        registry_job.result.return_value = [_tenant_row()]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        failed_job = Mock()
+        failed_job.job_id = "job-page-failed"
+        failed_job.cache_hit = True
+        failed_job.total_bytes_processed = 7_000_000
+        failed_job.total_bytes_billed = 6_000_000
+        failed_job.result.return_value = FailingRows()
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, failed_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="初衣食午股份有限公司",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+                include_query=True,
+            )
+
+        query = raised.exception.as_result()["details"]["query_provenance"][
+            "queries"
+        ][0]
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(query["job_id"], "job-page-failed")
+        self.assertTrue(query["cache_hit"])
+        self.assertEqual(query["bytes_processed"], 7_000_000)
+        self.assertEqual(query["bytes_billed"], 6_000_000)
+
     def test_generic_query_uses_ecommerce_profile_from_registry(self):
         registry_job = Mock()
         registry_job.result.return_value = [_tenant_row(ec=True)]

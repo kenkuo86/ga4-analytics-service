@@ -309,6 +309,12 @@ def _attach_provenance_if_requested(
         attach_query_provenance(error, records)
 
 
+def _query_job_for_error(error: Exception, fallback: Any = None) -> Any:
+    """Keep the accepted BigQuery job when a later iterator operation fails."""
+
+    return getattr(error, "_query_job", None) or fallback
+
+
 def query_ga4_semantic_metrics(
     customer_name: str,
     metric_ids: list[str],
@@ -424,6 +430,7 @@ def query_ga4_semantic_metrics(
     for index, item in enumerate(prepared_metrics):
         metric_id = item["metric_id"]
         metric = item["metric"]
+        query_job = None
         try:
             query_job, rows = query_policy.execute(client, item["query"])
             rows = list(rows)
@@ -432,7 +439,7 @@ def query_ga4_semantic_metrics(
                 *executed_records,
                 build_query_provenance(
                     item["query"],
-                    job=getattr(error, "_query_job", None),
+                    job=_query_job_for_error(error, query_job),
                     status="failed",
                     estimated_bytes_processed=estimates.get(metric_id),
                 ),
@@ -463,7 +470,7 @@ def query_ga4_semantic_metrics(
                 *executed_records,
                 build_query_provenance(
                     item["query"],
-                    job=getattr(error, "_query_job", None),
+                    job=_query_job_for_error(error, query_job),
                     status="failed",
                     estimated_bytes_processed=estimates.get(metric_id),
                 ),
@@ -617,7 +624,7 @@ def get_traffic_summary(
             [
                 build_query_provenance(
                     prepared_query,
-                    job=getattr(error, "_query_job", None),
+                    job=_query_job_for_error(error, query_job),
                     status="failed",
                     estimated_bytes_processed=estimates.get("traffic_summary"),
                 )
@@ -636,7 +643,7 @@ def get_traffic_summary(
             [
                 build_query_provenance(
                     prepared_query,
-                    job=getattr(error, "_query_job", None),
+                    job=_query_job_for_error(error, query_job),
                     status="failed",
                     estimated_bytes_processed=estimates.get("traffic_summary"),
                 )
@@ -654,6 +661,7 @@ def get_traffic_summary(
     try:
         row_iterator = iter(rows)
         row = next(row_iterator)
+        has_extra_row = next(row_iterator, None) is not None
     except StopIteration as error:
         report_error = TrafficSummaryReportError()
         _attach_provenance_if_requested(
@@ -662,7 +670,15 @@ def get_traffic_summary(
             include_query=include_query,
         )
         raise report_error from error
-    if next(row_iterator, None) is not None:
+    except Exception as error:
+        report_error = TrafficSummaryReportError()
+        _attach_provenance_if_requested(
+            report_error,
+            [successful_record],
+            include_query=include_query,
+        )
+        raise report_error from error
+    if has_extra_row:
         report_error = TrafficSummaryReportError()
         _attach_provenance_if_requested(
             report_error,
