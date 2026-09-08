@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import os
 from types import SimpleNamespace
 import unittest
@@ -15,6 +15,7 @@ from main import (
     get_traffic_summary,
 )
 from query_policy import QueryPolicyError
+from traffic_summary_report import TrafficSummaryReportError
 
 
 def _row(**overrides):
@@ -35,6 +36,25 @@ def _client_with_rows(rows):
     client = Mock()
     client.query.return_value = query_job
     return client
+
+
+def _traffic_daily_series(start_date, comparison_start_date, day_count):
+    empty_values = {
+        "total_sessions": 0,
+        "total_users": 0,
+        "new_users": 0,
+        "returning_users": 0,
+    }
+    return [
+        SimpleNamespace(
+            day_index=day_index,
+            date=start_date + timedelta(days=day_index),
+            comparison_date=comparison_start_date + timedelta(days=day_index),
+            current=empty_values,
+            previous=empty_values,
+        )
+        for day_index in range(day_count)
+    ]
 
 
 class TenantResolutionTests(unittest.TestCase):
@@ -219,6 +239,11 @@ class TenantResolutionTests(unittest.TestCase):
                     "new_users": -14.29,
                     "returning_users": -14.29,
                 },
+                daily_series=_traffic_daily_series(
+                    date(2026, 8, 17),
+                    date(2026, 8, 10),
+                    7,
+                ),
             )
         ]
         dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
@@ -239,6 +264,11 @@ class TenantResolutionTests(unittest.TestCase):
                 "dataset_id": "ga4_mar",
             },
         )
+        self.assertEqual(result["report_type"], "traffic_summary")
+        self.assertEqual(result["report_schema_version"], "1.0.0")
+        self.assertEqual(len(result["daily_series"]), 7)
+        self.assertEqual(result["presentation"]["type"], "line_chart")
+        self.assertEqual(len(client.query.call_args_list), 3)
         execution_config = client.query.call_args_list[2].kwargs["job_config"]
         self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
         self.assertTrue(execution_config.use_query_cache)
@@ -292,6 +322,31 @@ class TenantResolutionTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "query_cost_limit_exceeded")
         self.assertEqual(client.query.call_count, 2)
+
+    def test_traffic_summary_empty_result_is_a_safe_contract_error(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_row(project_id="customer-project")]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        summary_job = Mock()
+        summary_job.result.return_value = []
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, summary_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(TrafficSummaryReportError) as raised,
+        ):
+            get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-08-17",
+                "2026-08-23",
+            )
+
+        self.assertEqual(raised.exception.code, "invalid_report_contract")
+        self.assertEqual(
+            raised.exception.as_result()["message"],
+            "目前無法產生流量摘要報表，請稍後再試。",
+        )
 
 
 if __name__ == "__main__":

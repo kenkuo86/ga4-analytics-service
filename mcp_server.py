@@ -22,6 +22,7 @@ from oauth_auth import oauth_runtime
 from oauth_server import jwks_response
 from query_policy import QueryPolicyError
 from semantic_catalog import SemanticCatalogError
+from traffic_summary_report import TrafficSummaryReportError
 
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -152,7 +153,11 @@ def traffic_summary(
             start_date=start_date,
             end_date=end_date,
         )
-    except (TenantResolutionError, QueryPolicyError) as error:
+    except (
+        TenantResolutionError,
+        QueryPolicyError,
+        TrafficSummaryReportError,
+    ) as error:
         return error.as_result()
 
 

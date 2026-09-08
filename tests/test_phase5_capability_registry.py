@@ -21,7 +21,7 @@ class PhaseFiveCapabilityRegistryTests(unittest.TestCase):
         result = capability_registry.resolve()
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["registry_version"], "1.0.0")
+        self.assertEqual(result["registry_version"], "1.1.0")
         self.assertEqual(result["data_access"], "local_metadata_only")
         self.assertFalse(result["selection_token_required"])
         capability_lookup = next(

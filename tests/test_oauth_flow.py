@@ -210,6 +210,8 @@ class OAuthFlowTests(unittest.TestCase):
         self.assertIn("never need to know or provide tenant_id", server_instructions)
         self.assertIn("as internal metadata", server_instructions)
         self.assertIn("Never invent a metric ID or SQL", server_instructions)
+        self.assertIn("small_multiples layout", server_instructions)
+        self.assertIn("replace the report with a table", server_instructions)
         session_headers = {
             **self.headers,
             "authorization": f"Bearer {tokens['access_token']}",
@@ -273,6 +275,12 @@ class OAuthFlowTests(unittest.TestCase):
         )["description"]
         self.assertIn("never ask the user for project_id", traffic_description)
         self.assertIn("BigQuery cost policy applies", traffic_description)
+        self.assertIn("line_chart with small_multiples layout", traffic_description)
+        self.assertIn(
+            "exactly the current and previous series",
+            " ".join(traffic_description.split()),
+        )
+        self.assertIn("Use daily_series directly", traffic_description)
 
         authorized_rest = self.client.get(
             "/traffic-summary",

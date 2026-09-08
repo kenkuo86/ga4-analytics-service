@@ -8,7 +8,7 @@ from typing import Any
 from semantic_catalog import SemanticCatalog, semantic_catalog
 
 
-CAPABILITY_REGISTRY_VERSION = "1.0.0"
+CAPABILITY_REGISTRY_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -85,12 +85,17 @@ structured limit error instead of retrying around it.
 Get GA4 traffic summary by the customer's registered name and date range.
 
 Returns current period, previous period, and percentage change for total
-sessions, total users, new users, and returning users. Always use the customer
-name stated by the user. If the result status is tenant_not_found, tell the
-user that the customer does not exist in the tenant registry. If it is
-tenant_inactive, explain that the customer exists but is not currently
-available. Never guess a different customer. The result includes data_source
-routing metadata; retain it as context and never ask the user for project_id
+sessions, total users, new users, and returning users. When status is ok,
+render the result strictly as the versioned presentation contract declares:
+a line_chart with small_multiples layout, one chart per metric, and exactly
+the current and previous series declared by each chart. Use daily_series directly;
+preserve its source-date x-axis and day_index comparison alignment,
+and do not replace the report with a table, infer values, or add another
+series. Always use the customer name stated by the user. If the result status
+is tenant_not_found, tell the user that the customer does not exist in the
+tenant registry. If status is tenant_inactive, explain that the customer exists
+but is not currently available. Never guess a different customer. The result
+includes data_source routing metadata; retain it as context and never ask the user for project_id
 or dataset_id. For supported follow-up analyses such as source, medium, or
 campaign, use search_ga4_metrics and query_ga4 rather than claiming arbitrary
 BigQuery access. The same shared date and BigQuery cost policy applies to this
@@ -138,6 +143,12 @@ project ID or dataset ID to work around a missing capability.
 Each semantic metric result includes date_scope. If it is all_available_data,
 state that the metric definition is an all-data snapshot and do not describe it
 as limited to the requested period.
+
+For a successful traffic_summary result, follow its presentation contract
+exactly: render a line chart with small_multiples layout, one chart per metric,
+and only the current and previous series declared there. Use daily_series as
+the chart data, preserve its source-date x-axis and day_index comparison
+alignment, and do not replace the report with a table or invent missing data.
 
 Never present general knowledge or an inference as actual customer data, and
 never claim a catalog metric was queried unless a tool returned status ok.

@@ -38,20 +38,20 @@ Capability resolution 固定區分三種結果：
 - `supported`：明確要求 GA4 traffic summary，或同時指明 GA4 與分析 metric 且本機
   catalog 有已發布候選，依 `next_action` 搜尋或查詢。模糊 catalog hit 本身不足以判定
   supported。
-- `unsupported`：Google Ads／Meta／Facebook 廣告成效、SEO keyword ranking／Search
-  Console、外部 CRM／名單／銷售管線、天氣等外部資料、任意 BigQuery／SQL 或資料修改；
-  mixed request 中只要仍含這些肯定要求就會 fail closed，不得因另一部分命中 GA4 catalog
-  而只執行部分需求，也不得以一般知識或推論冒充客戶資料。GA4 自身已發布的
-  `generate_lead`／名單轉換事件不屬於外部 CRM 資料。含連接詞的 mixed request 會逐段
-  檢查；任何本機 catalog 無法覆蓋的剩餘片段都會要求澄清，不會回報整體 supported。
+- `unsupported`：registry 規則明確認得的 Google Ads／Meta／Facebook 廣告成效、SEO
+  keyword ranking／Search Console、外部 CRM／名單／銷售管線、天氣等外部資料、任意
+  BigQuery／SQL 或資料修改。GA4 自身已發布的 `generate_lead`／名單轉換事件不屬於外部
+  CRM 資料。
 - `needs_clarification`：請求過於籠統或找不到明確的 GA4 metric，應先詢問指標或分析
   維度，不查詢客戶資料。單獨的「流量」或「SEO 表現」屬於這一類。
 
 Resolver 只會移除明確否定的外部來源片段；例如「不要查 Google Ads，請查 GA4
 sessions」會解析 affirmative GA4 request，而不是因出現 Ads 字樣誤判為 unsupported。
 中英文否定及沒有標點的寫法採相同規則，否定片段後的 SQL 或破壞性要求仍會保留並拒絕。
-若同一請求同時肯定要求 GA4 與外部資料，仍以 unsupported 回覆，避免只執行部分需求
-卻宣稱完成全部分析。
+Versioned eval cases 中的 mixed request 會逐段檢查；但這個 PoC 的 deterministic
+resolver 不保證涵蓋所有自然語言排列。未列入規則的外部來源限定詞、複合句或新措辭可能
+誤判或只解析出可支援的 GA4 部分；這是已接受的 presentation／tool-choice limitation，
+不會擴張 server-side 可執行的資料來源、SQL、metric 或 tenant routing。
 
 `query_ga4` 保持原有 API，不要求 selection token。即使 host model 略過 catalog
 search，server 仍會先在本機確認所有 `metric_ids` 至少有一個共同的 published
@@ -66,6 +66,14 @@ CRM／名單／銷售管線、SQL／write、否定及 mixed GA4 request、泛詞
 未知 metric 與日期越界。這些測試只驗證 server-side resolution 與 BigQuery 呼叫邊界，
 不能保證 host model 的 tool choice 或回答措辭；實際對話行為仍必須在部署後以 Claude
 connector eval 驗收。
+
+`traffic_summary` 成功結果固定使用 versioned report contract（目前為
+`report_schema_version=1.0.0`）。Host 必須依結果中的 `presentation` 呈現：使用
+`line_chart` 的 `small_multiples` layout，依固定順序為四個 metric 各畫一張圖，
+每張圖只包含 `current` 與 `previous` 兩條 series。圖表資料直接取自
+`daily_series`；x 軸是 `mar_ga_sessions.session_date` 的 source date，前期以
+`day_index` 對齊，缺失日期已由服務補成 0。`headline_metrics` 提供同一份查詢的
+期間總覽，不能由每日資料重新推算 distinct users。
 
 當使用者詢問「目前有哪些客戶可以查詢」時，connector 應直接呼叫
 `list_available_customers` 並列出客戶名稱。Registry Google Sheet 是管理介面，
@@ -294,4 +302,4 @@ PR 完成後需經獨立 review；agent 可以發 PR，但最終只由 repositor
 python -m unittest discover -s tests -v
 ```
 
-測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。
+測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection、traffic summary report contract，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。
