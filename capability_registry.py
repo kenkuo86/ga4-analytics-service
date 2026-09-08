@@ -150,24 +150,33 @@ class CapabilityRegistry:
     def __init__(self, catalog: SemanticCatalog):
         self.catalog = catalog
         self.version = CAPABILITY_REGISTRY_VERSION
+        ads_platform = (
+            r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
+        )
+        ads_native_metric = (
+            r"(?:廣告|成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|"
+            r"ctr|clicks?|impressions?|conversions?|曝光|點擊|轉換)"
+        )
         self.unsupported_intents = (
             UnsupportedIntent(
                 "advertising_data",
                 "Google Ads／Meta／Facebook 廣告資料",
                 (
                     re.compile(
-                        r"(?<![a-z0-9])(?:google\s*ads?|meta\s*ads?|"
-                        r"facebook\s*ads?|fb\s*廣告)(?![a-z0-9]).{0,20}"
-                        r"(?:廣告|成效|花費|費用|成本|spend|cost|performance|"
-                        r"cpc|cpm|roas|曝光|點擊)"
+                        rf"(?<![a-z0-9]){ads_platform}(?![a-z0-9]).{{0,20}}"
+                        rf"{ads_native_metric}"
+                    ),
+                    re.compile(
+                        rf"{ads_native_metric}.{{0,20}}"
+                        rf"(?<![a-z0-9]){ads_platform}(?![a-z0-9])"
                     ),
                     re.compile(
                         r"(?:不要排除|不是不要|沒有說不要|没有说不要).{0,12}"
-                        r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
+                        rf"{ads_platform}"
                     ),
                     re.compile(
                         r"(?:廣告|(?<![a-z])ads?(?![a-z])).{0,12}"
-                        r"(?:成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|曝光|點擊)"
+                        rf"{ads_native_metric}"
                     ),
                 ),
                 "目前只提供 GA4 資料，不提供 Google Ads、Meta 或 Facebook 的媒體成效資料。",
@@ -242,7 +251,10 @@ class CapabilityRegistry:
                     ),
                     re.compile(r"\binsert\s+into\b|\bdelete\s+from\b|\bmerge\s+into\b"),
                     re.compile(r"\bupdate\s+(?:table\s+)?[a-z_][a-z0-9_.]*\s+set\b"),
-                    re.compile(r"\bdrop\s+(?:table|view|dataset)\b|\btruncate\s+table\b"),
+                    re.compile(
+                        r"\b(?:create|drop)\s+(?:table|view|dataset)\b|"
+                        r"\btruncate\s+table\b"
+                    ),
                     re.compile(
                         r"\b(?:erase|purge|wipe)\b.{0,24}"
                         r"\b(?:data|records?|rows?|table)\b"
@@ -451,16 +463,31 @@ class CapabilityRegistry:
     def _affirmative_request(self, request: str) -> str:
         """Remove only explicitly negated external-source spans."""
 
-        clauses = re.split(r"([，,。；;]+)", request)
+        clauses = re.split(
+            r"([，,。；;]+|(?<![a-z])(?:and|but|plus|then)(?![a-z])|"
+            r"(?:以及|並且|同時|加上|然後|再查|與|和))",
+            request,
+        )
         without_exclusions = [
             (
                 self._negated_external_pattern.sub(" ", clause, count=1)
-                if not re.fullmatch(r"[，,。；;]+", clause)
+                if not re.fullmatch(
+                    r"[，,。；;]+|(?<![a-z])(?:and|but|plus|then)(?![a-z])|"
+                    r"(?:以及|並且|同時|加上|然後|再查|與|和)",
+                    clause,
+                )
                 else clause
             )
             for clause in clauses
         ]
-        return "".join(without_exclusions).strip(" ，,。；;")
+        result = " ".join(without_exclusions)
+        result = re.sub(
+            r"(?:(?<![a-z])(?:and|but|plus|then)(?![a-z])|"
+            r"(?:以及|並且|同時|加上|然後|再查|與|和))\s*$",
+            "",
+            result,
+        )
+        return result.strip(" ，,。；;")
 
     def _unresolved_mixed_clause(self, request: str) -> str | None:
         """Return the first affirmative mixed clause not covered by GA4 metadata."""

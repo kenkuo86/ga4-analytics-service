@@ -24,6 +24,22 @@
     "expected_bigquery_calls": 0
   },
   {
+    "case_id": "meta_ads_conversions",
+    "operation": "capability_lookup",
+    "request": "Compare GA4 sessions and Meta Ads conversions",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "google_ads_roas_reverse_order",
+    "operation": "capability_lookup",
+    "request": "What is ROAS for Google Ads?",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "advertising_data",
+    "expected_bigquery_calls": 0
+  },
+  {
     "case_id": "facebook_ads_performance",
     "operation": "capability_lookup",
     "request": "Facebook 廣告成效",
@@ -206,6 +222,22 @@
     "case_id": "negated_ads_ga4_sessions",
     "operation": "capability_lookup",
     "request": "不要查 Google Ads，請查 GA4 sessions",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_ads_after_conjunction",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions and don't query Google Ads",
+    "expected_resolution": "supported",
+    "expected_reason_code": "ga4_semantic_metric",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "negated_ads_after_but",
+    "operation": "capability_lookup",
+    "request": "Show GA4 sessions, but don't query Google Ads",
     "expected_resolution": "supported",
     "expected_reason_code": "ga4_semantic_metric",
     "expected_bigquery_calls": 0
@@ -406,6 +438,14 @@
     "case_id": "mixed_ga4_truncate_table",
     "operation": "capability_lookup",
     "request": "查 GA4 sessions then truncate table",
+    "expected_resolution": "unsupported",
+    "expected_reason_code": "data_modification",
+    "expected_bigquery_calls": 0
+  },
+  {
+    "case_id": "mixed_ga4_create_table",
+    "operation": "capability_lookup",
+    "request": "GA4 sessions then CREATE TABLE tmp",
     "expected_resolution": "unsupported",
     "expected_reason_code": "data_modification",
     "expected_bigquery_calls": 0
