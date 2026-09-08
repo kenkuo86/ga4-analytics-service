@@ -26,6 +26,14 @@ dataset，供 host model 保留為內部 routing context；使用者不需要知
 catalog 決定可用指標與查詢方法；不在 catalog 的問題會回傳 `unsupported_metric`，
 不得要求使用者提供 project、dataset 或 SQL 來繞過能力邊界。
 
+`traffic_summary` 成功結果固定使用 versioned report contract（目前為
+`report_schema_version=1.0.0`）。Host 必須依結果中的 `presentation` 呈現：使用
+`line_chart` 的 `small_multiples` layout，依固定順序為四個 metric 各畫一張圖，
+每張圖只包含 `current` 與 `previous` 兩條 series。圖表資料直接取自
+`daily_series`；x 軸是 `mar_ga_sessions.session_date` 的 source date，前期以
+`day_index` 對齊，缺失日期已由服務補成 0。`headline_metrics` 提供同一份查詢的
+期間總覽，不能由每日資料重新推算 distinct users。
+
 當使用者詢問「目前有哪些客戶可以查詢」時，connector 應直接呼叫
 `list_available_customers` 並列出客戶名稱。Registry Google Sheet 是管理介面，
 不作為預設回答，以免暴露不必要的內部欄位或讓使用者受 Sheet 分享權限影響。
@@ -253,4 +261,4 @@ PR 完成後需經獨立 review；agent 可以發 PR，但最終只由 repositor
 python -m unittest discover -s tests -v
 ```
 
-測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。
+測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection、traffic summary report contract，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。

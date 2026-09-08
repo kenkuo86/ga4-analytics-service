@@ -68,6 +68,12 @@ Each semantic metric result includes date_scope. If it is all_available_data,
 state that the metric definition is an all-data snapshot and do not describe it
 as limited to the requested period.
 
+For a successful traffic_summary result, follow its presentation contract exactly:
+render a line chart with small_multiples layout, one chart per metric, and only
+the current and previous series declared there. Use daily_series as the chart
+data, keep its source-date x-axis and day_index comparison alignment, and do not
+replace the report with a table or invent missing data.
+
 This server does not provide ads, SEO keyword ranking, CRM, or arbitrary
 BigQuery access. Never present general knowledge or an inference as actual
 customer data, and never claim a catalog metric was queried unless a tool
@@ -209,6 +215,13 @@ def traffic_summary(
 
     Returns current period, previous period, and percentage change for:
     total sessions, total users, new users, and returning users.
+
+    When status is ok, render the result strictly according to its versioned
+    presentation contract: a line_chart with small_multiples layout, one chart
+    for each metric in presentation.charts, and exactly the current and
+    previous series declared by each chart. Use daily_series directly, with
+    date as the source-date x-axis and comparison aligned by day_index. Do not
+    replace it with a table, infer values, or add another series.
 
     Always use the customer name stated by the user. If the result status is
     tenant_not_found, tell the user that the customer does not exist in the
