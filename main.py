@@ -12,7 +12,14 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from capability_registry import capability_registry
 from oauth_auth import require_rest_oauth
-from query_policy import PreparedQuery, QueryPolicyError, query_policy
+from query_policy import (
+    QUERY_PROVENANCE_SCHEMA_VERSION,
+    PreparedQuery,
+    QueryPolicyError,
+    attach_query_provenance,
+    build_query_provenance,
+    query_policy,
+)
 from semantic_catalog import SemanticCatalogError, semantic_catalog
 from traffic_summary_report import (
     TrafficSummaryReportError,
@@ -33,13 +40,17 @@ class TenantResolutionError(ValueError):
         self.code = code
         self.customer_name = customer_name
         self.message = message
+        self.details: dict[str, Any] = {}
 
-    def as_result(self) -> dict:
-        return {
+    def as_result(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "status": self.code,
             "customer_name": self.customer_name,
             "message": self.message,
         }
+        if self.details:
+            result["details"] = self.details
+        return result
 
 
 def get_bigquery_client():
@@ -281,12 +292,36 @@ def _serialize_bigquery_value(value: Any) -> Any:
     return str(value)
 
 
+def _query_provenance_result(records: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": QUERY_PROVENANCE_SCHEMA_VERSION,
+        "queries": records,
+    }
+
+
+def _attach_provenance_if_requested(
+    error: Exception,
+    records: list[dict[str, Any]],
+    *,
+    include_query: bool,
+) -> None:
+    if include_query:
+        attach_query_provenance(error, records)
+
+
+def _query_job_for_error(error: Exception, fallback: Any = None) -> Any:
+    """Keep the accepted BigQuery job when a later iterator operation fails."""
+
+    return getattr(error, "_query_job", None) or fallback
+
+
 def query_ga4_semantic_metrics(
     customer_name: str,
     metric_ids: list[str],
     start_date: str,
     end_date: str,
     limit: int = 50,
+    include_query: bool = False,
 ) -> dict[str, Any]:
     """Execute catalog-approved metric SQL for one resolved tenant."""
 
@@ -326,7 +361,7 @@ def query_ga4_semantic_metrics(
         tenant["semantic_profile"],
     )
     profile_resolution = "tenant_registry.ec"
-    prepared_metrics = []
+    prepared_metrics: list[dict[str, Any]] = []
     for metric_id in normalized_metric_ids:
         sql, metric = semantic_catalog.compile_sql(
             profile=resolved_profile,
@@ -340,7 +375,7 @@ def query_ga4_semantic_metrics(
             if "@start_date" in sql and "@end_date" in sql
             else "all_available_data"
         )
-        query_parameters = []
+        query_parameters: list[Any] = []
         if "@start_date" in sql:
             query_parameters.append(
                 bigquery.ScalarQueryParameter("start_date", "DATE", parsed_start)
@@ -362,30 +397,108 @@ def query_ga4_semantic_metrics(
                         "component": "semantic",
                         "profile": resolved_profile.replace("_", "-")[:63],
                     },
+                    catalog_version=semantic_catalog.version,
                 ),
             }
         )
 
-    query_policy.preflight_request(
-        client,
-        [item["query"] for item in prepared_metrics],
-    )
+    queries: list[PreparedQuery] = [item["query"] for item in prepared_metrics]
+    try:
+        estimates = query_policy.preflight_request(client, queries)
+    except QueryPolicyError as error:
+        records = [
+            build_query_provenance(
+                item["query"],
+                status="not_executed",
+                estimated_bytes_processed=(
+                    error.details.get("estimated_bytes")
+                    if error.details.get("query") == item["metric_id"]
+                    else None
+                ),
+            )
+            for item in prepared_metrics
+        ]
+        _attach_provenance_if_requested(
+            error,
+            records,
+            include_query=include_query,
+        )
+        raise
 
-    metric_results = []
-    for item in prepared_metrics:
+    metric_results: list[dict[str, Any]] = []
+    executed_records: list[dict[str, Any]] = []
+    for index, item in enumerate(prepared_metrics):
         metric_id = item["metric_id"]
         metric = item["metric"]
+        query_job = None
         try:
-            _, rows = query_policy.execute(client, item["query"])
+            query_job, rows = query_policy.execute(client, item["query"])
             rows = list(rows)
-        except QueryPolicyError:
+        except QueryPolicyError as error:
+            records = [
+                *executed_records,
+                build_query_provenance(
+                    item["query"],
+                    job=_query_job_for_error(error, query_job),
+                    status="failed",
+                    estimated_bytes_processed=estimates.get(metric_id),
+                ),
+                *(
+                    build_query_provenance(
+                        future_item["query"],
+                        status="not_executed",
+                        estimated_bytes_processed=estimates.get(
+                            future_item["metric_id"]
+                        ),
+                    )
+                    for future_item in prepared_metrics[index + 1 :]
+                ),
+            ]
+            _attach_provenance_if_requested(
+                error,
+                records,
+                include_query=include_query,
+            )
             raise
         except Exception as error:
-            raise SemanticCatalogError(
+            semantic_error = SemanticCatalogError(
                 "data_unavailable",
                 f"客戶「{tenant['tenant_name']}」的指標「{metric_id}」目前無法查詢。",
                 details={"metric_id": metric_id},
-            ) from error
+            )
+            records = [
+                *executed_records,
+                build_query_provenance(
+                    item["query"],
+                    job=_query_job_for_error(error, query_job),
+                    status="failed",
+                    estimated_bytes_processed=estimates.get(metric_id),
+                ),
+                *(
+                    build_query_provenance(
+                        future_item["query"],
+                        status="not_executed",
+                        estimated_bytes_processed=estimates.get(
+                            future_item["metric_id"]
+                        ),
+                    )
+                    for future_item in prepared_metrics[index + 1 :]
+                ),
+            ]
+            _attach_provenance_if_requested(
+                semantic_error,
+                records,
+                include_query=include_query,
+            )
+            raise semantic_error from error
+
+        executed_records.append(
+            build_query_provenance(
+                item["query"],
+                job=query_job,
+                estimated_bytes_processed=estimates.get(metric_id),
+            )
+        )
 
         truncated = len(rows) > result_limit
         serialized_rows = [
@@ -406,7 +519,7 @@ def query_ga4_semantic_metrics(
             }
         )
 
-    return {
+    result = {
         "status": "ok",
         "tenant": {
             "tenant_id": tenant["tenant_id"],
@@ -427,12 +540,16 @@ def query_ga4_semantic_metrics(
         },
         "metrics": metric_results,
     }
+    if include_query:
+        result["query_provenance"] = _query_provenance_result(executed_records)
+    return result
 
 
 def get_traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
+    include_query: bool = False,
 ):
     parsed_start, parsed_end = query_policy.validate_date_range(
         start_date,
@@ -477,33 +594,121 @@ def get_traffic_summary(
             ),
         ],
         labels={"component": "traffic-summary"},
+        catalog_version=semantic_catalog.version,
     )
 
-    query_policy.preflight_request(client, [prepared_query])
-
     try:
-        _, rows = query_policy.execute(client, prepared_query)
-    except QueryPolicyError:
+        estimates = query_policy.preflight_request(client, [prepared_query])
+    except QueryPolicyError as error:
+        _attach_provenance_if_requested(
+            error,
+            [
+                build_query_provenance(
+                    prepared_query,
+                    status="not_executed",
+                    estimated_bytes_processed=error.details.get(
+                        "estimated_bytes"
+                    ),
+                )
+            ],
+            include_query=include_query,
+        )
+        raise
+
+    query_job = None
+    try:
+        query_job, rows = query_policy.execute(client, prepared_query)
+    except QueryPolicyError as error:
+        _attach_provenance_if_requested(
+            error,
+            [
+                build_query_provenance(
+                    prepared_query,
+                    job=_query_job_for_error(error, query_job),
+                    status="failed",
+                    estimated_bytes_processed=estimates.get("traffic_summary"),
+                )
+            ],
+            include_query=include_query,
+        )
         raise
     except Exception as error:
-        raise TenantResolutionError(
+        mapped_error = TenantResolutionError(
             "data_unavailable",
             customer_name,
             f"客戶「{tenant['tenant_name']}」存在於 tenant registry，但目前無法取得 GA4 流量資料。",
-        ) from error
+        )
+        _attach_provenance_if_requested(
+            mapped_error,
+            [
+                build_query_provenance(
+                    prepared_query,
+                    job=_query_job_for_error(error, query_job),
+                    status="failed",
+                    estimated_bytes_processed=estimates.get("traffic_summary"),
+                )
+            ],
+            include_query=include_query,
+        )
+        raise mapped_error from error
 
-    row_iterator = iter(rows)
-    try:
-        row = next(row_iterator)
-    except StopIteration as error:
-        raise TrafficSummaryReportError() from error
-    if next(row_iterator, None) is not None:
-        raise TrafficSummaryReportError()
-
-    return build_traffic_summary_report(
-        row=row,
-        tenant=tenant,
+    successful_record = build_query_provenance(
+        prepared_query,
+        job=query_job,
+        estimated_bytes_processed=estimates.get("traffic_summary"),
     )
+
+    try:
+        row_iterator = iter(rows)
+        row = next(row_iterator)
+        has_extra_row = next(row_iterator, None) is not None
+    except StopIteration as error:
+        report_error = TrafficSummaryReportError()
+        _attach_provenance_if_requested(
+            report_error,
+            [successful_record],
+            include_query=include_query,
+        )
+        raise report_error from error
+    except Exception as error:
+        report_error = TrafficSummaryReportError()
+        _attach_provenance_if_requested(
+            report_error,
+            [
+                build_query_provenance(
+                    prepared_query,
+                    job=query_job,
+                    status="failed",
+                    estimated_bytes_processed=estimates.get("traffic_summary"),
+                )
+            ],
+            include_query=include_query,
+        )
+        raise report_error from error
+    if has_extra_row:
+        report_error = TrafficSummaryReportError()
+        _attach_provenance_if_requested(
+            report_error,
+            [successful_record],
+            include_query=include_query,
+        )
+        raise report_error
+
+    try:
+        result = build_traffic_summary_report(
+            row=row,
+            tenant=tenant,
+        )
+    except TrafficSummaryReportError as error:
+        _attach_provenance_if_requested(
+            error,
+            [successful_record],
+            include_query=include_query,
+        )
+        raise
+    if include_query:
+        result["query_provenance"] = _query_provenance_result([successful_record])
+    return result
 
 
 @app.get(
@@ -514,12 +719,14 @@ def traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
+    include_query: bool = False,
 ):
     try:
         return get_traffic_summary(
             customer_name=customer_name,
             start_date=start_date,
             end_date=end_date,
+            include_query=include_query,
         )
     except TenantResolutionError as error:
         status_code = 404 if error.code == "tenant_not_found" else 409

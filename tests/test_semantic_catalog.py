@@ -185,11 +185,158 @@ class SemanticCatalogTests(unittest.TestCase):
                 "sessions_by_source_medium": 123,
             },
         )
+        self.assertNotIn("query_provenance", result)
         semantic_sql = client.query.call_args_list[2].args[0]
         self.assertIn("`customer-project.ga4_mar.mar_ga_sessions`", semantic_sql)
         execution_config = client.query.call_args_list[2].kwargs["job_config"]
         self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
         self.assertTrue(execution_config.use_query_cache)
+
+    def test_multi_metric_query_returns_ordered_query_provenance_on_request(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_tenant_row()]
+        dry_run_jobs = [
+            SimpleNamespace(total_bytes_processed=1_000_000),
+            SimpleNamespace(total_bytes_processed=2_000_000),
+        ]
+        metric_jobs = []
+        for job_id, rows, bytes_processed, bytes_billed in (
+            (
+                "job-sessions",
+                [{"total_sessions": 123}],
+                3_000_000,
+                2_000_000,
+            ),
+            (
+                "job-users",
+                [{"total_users": 45}],
+                4_000_000,
+                3_000_000,
+            ),
+        ):
+            job = Mock()
+            job.job_id = job_id
+            job.cache_hit = False
+            job.total_bytes_processed = bytes_processed
+            job.total_bytes_billed = bytes_billed
+            job.result.return_value = rows
+            metric_jobs.append(job)
+
+        client = Mock()
+        client.query.side_effect = [
+            registry_job,
+            *dry_run_jobs,
+            *metric_jobs,
+        ]
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = query_ga4_semantic_metrics(
+                customer_name="初衣食午股份有限公司",
+                metric_ids=["total_sessions", "total_users"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+                include_query=True,
+            )
+
+        provenance = result["query_provenance"]
+        self.assertEqual(provenance["schema_version"], "1.0.0")
+        self.assertEqual(
+            [query["metric_id"] for query in provenance["queries"]],
+            ["total_sessions", "total_users"],
+        )
+        first_query = provenance["queries"][0]
+        self.assertIn("@start_date", first_query["sql"])
+        self.assertIn("@end_date", first_query["sql"])
+        self.assertEqual(
+            first_query["parameters"],
+            [
+                {"name": "start_date", "type": "DATE", "value": "2026-08-17"},
+                {"name": "end_date", "type": "DATE", "value": "2026-08-23"},
+            ],
+        )
+        self.assertEqual(first_query["job_id"], "job-sessions")
+        self.assertFalse(first_query["cache_hit"])
+        self.assertEqual(first_query["bytes_processed"], 3_000_000)
+        self.assertEqual(first_query["bytes_billed"], 2_000_000)
+        self.assertEqual(first_query["catalog_version"], "1.1.0")
+
+    def test_failed_metric_query_keeps_structured_provenance(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [_tenant_row()]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        failed_job = Mock()
+        failed_job.job_id = "job-failed"
+        failed_job.cache_hit = False
+        failed_job.total_bytes_processed = 5_000_000
+        failed_job.total_bytes_billed = 5_000_000
+        failed_job.result.side_effect = RuntimeError("query failed")
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, failed_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="初衣食午股份有限公司",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+                include_query=True,
+            )
+
+        self.assertEqual(raised.exception.code, "data_unavailable")
+        provenance = raised.exception.as_result()["details"]["query_provenance"]
+        self.assertEqual(provenance["queries"][0]["status"], "failed")
+        self.assertEqual(provenance["queries"][0]["job_id"], "job-failed")
+        self.assertEqual(provenance["queries"][0]["bytes_billed"], 5_000_000)
+
+    def test_failed_metric_row_iteration_keeps_returned_job_metadata(self):
+        class FailingRows:
+            def __init__(self):
+                self.returned_first_row = False
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if not self.returned_first_row:
+                    self.returned_first_row = True
+                    return {"total_sessions": 123}
+                raise RuntimeError("next page failed")
+
+        registry_job = Mock()
+        registry_job.result.return_value = [_tenant_row()]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        failed_job = Mock()
+        failed_job.job_id = "job-page-failed"
+        failed_job.cache_hit = True
+        failed_job.total_bytes_processed = 7_000_000
+        failed_job.total_bytes_billed = 6_000_000
+        failed_job.result.return_value = FailingRows()
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, failed_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="初衣食午股份有限公司",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+                include_query=True,
+            )
+
+        query = raised.exception.as_result()["details"]["query_provenance"][
+            "queries"
+        ][0]
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(query["job_id"], "job-page-failed")
+        self.assertTrue(query["cache_hit"])
+        self.assertEqual(query["bytes_processed"], 7_000_000)
+        self.assertEqual(query["bytes_billed"], 6_000_000)
 
     def test_generic_query_uses_ecommerce_profile_from_registry(self):
         registry_job = Mock()

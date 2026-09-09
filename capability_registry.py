@@ -79,7 +79,12 @@ returned with status ok and retain routing metadata as internal context.
 Respect each metric's date_scope: do not describe an all_available_data result
 as limited to start_date and end_date. The server enforces its configured
 date, per-job, request-total, timeout, and daily BigQuery cost limits; relay a
-structured limit error instead of retrying around it.
+structured limit error instead of retrying around it. Set include_query=true
+only when the user explicitly requests technical query verification. The
+result then includes the exact parameterized SQL sent to BigQuery, parameters
+as separate values, and per-query job metadata; never reconstruct SQL from
+the natural-language request. The default false keeps this provenance out of
+the normal compact result.
 """.strip(),
     "traffic_summary": """
 Get GA4 traffic summary by the customer's registered name and date range.
@@ -99,7 +104,10 @@ includes data_source routing metadata; retain it as context and never ask the us
 or dataset_id. For supported follow-up analyses such as source, medium, or
 campaign, use search_ga4_metrics and query_ga4 rather than claiming arbitrary
 BigQuery access. The same shared date and BigQuery cost policy applies to this
-tool and the REST endpoint.
+tool and the REST endpoint. Set include_query=true only when the user asks to
+audit the query: the result then includes the exact parameterized SQL,
+separate query parameters, and the BigQuery job metadata for the report. The
+default false keeps SQL and provenance out of the normal result.
 """.strip(),
 }
 
@@ -143,6 +151,11 @@ project ID or dataset ID to work around a missing capability.
 Each semantic metric result includes date_scope. If it is all_available_data,
 state that the metric definition is an all-data snapshot and do not describe it
 as limited to the requested period.
+
+Only set include_query=true for query_ga4 or traffic_summary when the user
+explicitly asks to inspect the executed query, parameters, or BigQuery job
+metadata. Treat query_provenance as technical audit output; do not expose it
+in an ordinary answer or reconstruct SQL when it is absent.
 
 For a successful traffic_summary result, follow its presentation contract
 exactly: render a line chart with small_multiples layout, one chart per metric,
