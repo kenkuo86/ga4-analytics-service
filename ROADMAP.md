@@ -13,7 +13,7 @@
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
 - 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
 
-目前功能 roadmap 僅剩 Phase 9：重新設計 OAuth consent page，並讓頁面能力說明與 capability registry 同步。其餘工作以持續監控成本、權限、tenant registry 品質及 connector 行為為主。
+目前 Phase 4–9 的功能 roadmap 已全部完成。其餘工作以持續監控成本、權限、tenant registry 品質及 connector 行為為主。
 
 ## Completed foundations
 
@@ -77,7 +77,7 @@ Dependencies: Foundations 1–2
 
 ## Implementation roadmap
 
-以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–8 已完成，Phase 9 待實作。
+以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–9 已全部完成。
 
 ### Phase 4: unified query cost controls
 
@@ -256,9 +256,11 @@ Dependencies: Phase 4
 
 ### Phase 9: consent page redesign and capability sync
 
-Status: Todo
+Status: Done
 
 Dependencies: Phases 5–6
+
+2026-09-09 已由 PR #10 完成並合併至 `main`：OAuth consent page 改為簡潔、低彩度且具 responsive／accessibility 基礎的介面，並由中央 capability registry 產生支援能力、公開 tools、限制與不支援項目。原有 approve、deny、PKCE、redirect flow 及安全 response headers 均由測試覆蓋。
 
 #### Goal
 
@@ -285,7 +287,7 @@ Dependencies: Phases 5–6
 
 ## Ongoing operational work
 
-以下項目與 Active roadmap 可並行，但每次正式發布前都應持續執行：
+以下項目是功能 roadmap 完成後的持續性營運工作，每次正式發布前都應持續執行：
 
 1. 維護 tenant registry 名稱、alias、狀態、project 與 ecommerce profile 品質。
 2. 對所有 active tenants 執行代表性 metric dry-run，確認 schema 及 IAM 沒有 drift。
