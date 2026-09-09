@@ -648,6 +648,11 @@ def query_ga4_semantic_metrics(
     try:
         estimates = query_policy.preflight_request(client, queries)
     except QueryPolicyError as error:
+        error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         records = [
             build_query_provenance(
                 item["query"],
@@ -700,6 +705,11 @@ def query_ga4_semantic_metrics(
                 error,
                 records,
                 include_query=include_query,
+            )
+            error.attach_tenant_context(
+                requested_name=tenant["requested_name"],
+                resolved_name=tenant["resolved_name"],
+                match_type=tenant["match_type"],
             )
             raise
         except Exception as error:
@@ -845,6 +855,11 @@ def get_traffic_summary(
     try:
         estimates = query_policy.preflight_request(client, [prepared_query])
     except QueryPolicyError as error:
+        error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         _attach_provenance_if_requested(
             error,
             [
@@ -864,6 +879,11 @@ def get_traffic_summary(
     try:
         query_job, rows = query_policy.execute(client, prepared_query)
     except QueryPolicyError as error:
+        error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         _attach_provenance_if_requested(
             error,
             [

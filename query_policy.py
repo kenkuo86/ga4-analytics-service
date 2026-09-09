@@ -37,12 +37,36 @@ class QueryPolicyError(ValueError):
         self.code = code
         self.message = message
         self.details = details or {}
+        self.requested_name: str | None = None
+        self.resolved_name: str | None = None
+        self.match_type: str | None = None
+
+    def attach_tenant_context(
+        self,
+        *,
+        requested_name: str,
+        resolved_name: str,
+        match_type: str,
+    ) -> None:
+        """Preserve tenant resolution context on post-resolution policy errors."""
+
+        self.requested_name = requested_name
+        self.resolved_name = resolved_name
+        self.match_type = match_type
 
     def as_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": self.code,
             "message": self.message,
         }
+        if self.requested_name is not None:
+            result.update(
+                {
+                    "requested_name": self.requested_name,
+                    "resolved_name": self.resolved_name,
+                    "match_type": self.match_type,
+                }
+            )
         if self.details:
             result["details"] = self.details
         return result

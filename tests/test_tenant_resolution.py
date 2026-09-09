@@ -703,6 +703,71 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "query_cost_limit_exceeded")
         self.assertEqual(client.query.call_count, 2)
 
+    def test_traffic_summary_policy_preflight_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+                project_id="customer-project",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=2_000_000_001)
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            get_traffic_summary(
+                "Orient Beauty",
+                "2026-08-17",
+                "2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "query_cost_limit_exceeded")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+
+    def test_traffic_summary_policy_execution_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+                project_id="customer-project",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1)
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job]
+        policy_error = QueryPolicyError("query_timeout", "temporary failure")
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            unittest.mock.patch(
+                "query_policy.QueryPolicy.execute",
+                side_effect=policy_error,
+            ),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            get_traffic_summary(
+                "Orient Beauty",
+                "2026-08-17",
+                "2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "query_timeout")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+
     def test_traffic_summary_empty_result_is_a_safe_contract_error(self):
         registry_job = Mock()
         registry_job.result.return_value = [_row(project_id="customer-project")]

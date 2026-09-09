@@ -228,6 +228,72 @@ class SemanticCatalogTests(unittest.TestCase):
             },
         )
 
+    def test_generic_query_policy_preflight_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.side_effect = [
+            registry_job,
+            SimpleNamespace(total_bytes_processed=2_000_000_001),
+        ]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "query_cost_limit_exceeded")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+
+    def test_generic_query_policy_execution_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.side_effect = [registry_job, SimpleNamespace(total_bytes_processed=1)]
+        policy_error = QueryPolicyError("query_timeout", "temporary failure")
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            unittest.mock.patch(
+                "query_policy.QueryPolicy.execute",
+                side_effect=policy_error,
+            ),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "query_timeout")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+
     def test_multi_metric_query_returns_ordered_query_provenance_on_request(self):
         registry_job = Mock()
         registry_job.result.return_value = [_tenant_row()]
