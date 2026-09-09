@@ -13,7 +13,7 @@
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
 - 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
 
-下一階段的重點不是繼續擴張查詢範圍，而是強化能力判斷、查詢可稽核性與一致的使用者體驗，並持續監控成本防線。
+目前功能 roadmap 僅剩 Phase 9：重新設計 OAuth consent page，並讓頁面能力說明與 capability registry 同步。其餘工作以持續監控成本、權限、tenant registry 品質及 connector 行為為主。
 
 ## Completed foundations
 
@@ -75,9 +75,9 @@ Dependencies: Foundations 1–2
 2. 為來源表增加 metric ID 唯一性、derived metric dependency、時間維度、model grain、owner 與變更說明等 schema validation。
 3. 視實際使用情況，將重複 SQL 拆成可組合的 base metric、dimension 與 filter definition。
 
-## Active implementation roadmap
+## Implementation roadmap
 
-以下順序以成本與資料安全優先，再逐步改善可信度及使用體驗。
+以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–8 已完成，Phase 9 待實作。
 
 ### Phase 4: unified query cost controls
 
@@ -114,9 +114,11 @@ Dependencies: None
 
 ### Phase 5: capability preflight and explicit AI boundaries
 
-Status: Todo
+Status: Done
 
 Dependencies: None. Recommended after Phase 4 because both are likely to modify `main.py`, MCP error handling, and query tests.
+
+2026-09-08 已由 PR #5 完成並合併至 `main`：加入中央 capability registry、`get_ga4_capabilities`、本機 preflight、公開 tool／server instructions 同步及 versioned connector behavior eval cases。實際 Claude connector 的 tool choice 與回答措辭仍屬部署後驗收項目。
 
 #### Goal
 
@@ -155,9 +157,11 @@ tenant routing、唯讀 SQL 與 query policy 負責，不能因 intent resolver 
 
 ### Phase 6: query provenance and auditability
 
-Status: Todo
+Status: Done
 
 Dependencies: Phase 4
+
+2026-09-09 已由 PR #7 完成並合併至 `main`：`query_ga4`、`traffic_summary` 與 REST traffic summary 路徑支援 opt-in `include_query`，並回傳實際 parameterized SQL、獨立 parameters、job metadata、catalog version 與失敗時可安全保留的 provenance。完整 project／dataset table path 僅在使用者明確要求 technical routing details 或 query provenance 時顯示。
 
 #### Goal
 
@@ -180,9 +184,11 @@ Dependencies: Phase 4
 
 ### Phase 7: managed customer aliases and candidate search
 
-Status: Todo
+Status: Done
 
 Dependencies: None. Coordinate with Phases 4–6 because tenant resolution and query orchestration share `main.py` and related tests.
+
+2026-09-09 已由 PR #8 完成並合併至 `main`：加入受管理 aliases、統一名稱 normalization、registry collision validation、候選搜尋與各查詢路徑的 tenant context。未登記的部分名稱即使只有一個候選，也只回傳候選並要求使用者以正式名稱確認，不會直接執行 tenant data query。
 
 #### Goal
 
@@ -197,7 +203,7 @@ Dependencies: None. Coordinate with Phases 4–6 because tenant resolution and q
    - 正式名稱完全符合：直接查詢。
    - 已登記 alias 完全符合：解析成正式名稱後查詢。
    - 未登記的部分名稱：只進行候選搜尋。
-5. 部分名稱只有一個候選時，回傳正式名稱與 `match_type=partial`；是否直接執行查詢或先要求確認，在實作前以資料隔離風險決定。
+5. 部分名稱只有一個候選時，回傳正式名稱與 `match_type=partial`，並要求使用者以正式名稱確認後才能執行查詢。
 6. 多個候選時列出選項，不得猜測或執行 tenant data query。
 7. Tool result 保留 `requested_name`、`resolved_name` 與 `match_type`，方便 AI 清楚說明使用了哪個客戶。
 
@@ -209,13 +215,15 @@ Dependencies: None. Coordinate with Phases 4–6 because tenant resolution and q
 
 #### Historical registry note
 
-2026-08-27 的一次匯出共有 77 筆 tenants，其中 54 筆 active、23 筆 provisioning，另有 29 筆缺少 `tenant_name`。這是歷史快照，不應視為目前即時數量；alias rollout 前需要重新盤點 registry，名稱空白的 tenants 仍無法供使用者查詢。
+2026-08-27 的一次匯出共有 77 筆 tenants，其中 54 筆 active、23 筆 provisioning，另有 29 筆缺少 `tenant_name`。這是歷史快照，不應視為目前即時數量；production alias data rollout 前需要重新盤點 registry，名稱空白的 tenants 仍無法供使用者查詢。
 
 ### Phase 8: deterministic traffic summary report contract
 
-Status: Todo
+Status: Done
 
 Dependencies: Phase 4
+
+2026-09-08 已由 PR #6 完成並合併至 `main`：traffic summary 使用單次掃描產出 headline metrics 與本期／前期 daily series，並回傳 versioned `line_chart` small-multiples presentation contract。實際 host 是否穩定依 contract 呈現仍需在部署後持續驗收。
 
 呈現決策：固定拆成四個 small-multiple 折線圖，每個 metric 一張圖，圖內各有本期與前期兩條 series；不使用難以辨識的單圖八條線。
 
@@ -285,9 +293,8 @@ Dependencies: Phases 5–6
 4. 維護 supported／unsupported intent eval set，避免模型或 tool description 更新後能力邊界退化。
 5. 使用固定部署腳本，並在重大 OAuth、IAM 或 report schema 變更時先以 no-traffic revision 驗證。
 
-## Decisions to confirm before implementation
+## Confirmed implementation decisions
 
-目前仍需確認以下產品決策：
-
-1. 未登記但只有一個部分名稱候選時，直接查詢或先要求使用者確認。
-2. Query provenance 是否允許顯示完整 project／dataset table path。
+1. 未登記的部分名稱不會授權資料查詢；即使只有一個候選，也先要求使用者以正式名稱確認。
+2. Project／dataset table path 視為 technical routing details；一般回應不顯示，只有使用者明確要求 technical routing details 或 query provenance 時才提供。
+3. Traffic summary 固定使用四個 small-multiple 折線圖，每個 metric 一張圖，圖內各有本期與前期兩條 series。
