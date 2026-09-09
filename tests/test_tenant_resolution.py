@@ -6,6 +6,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
+from fastapi.testclient import TestClient
+
+import main
+import mcp_server
 from main import (
     TenantResolutionError,
     get_available_customers,
@@ -13,6 +17,7 @@ from main import (
     get_customer_status,
     get_tenant_config,
     get_traffic_summary,
+    query_ga4_semantic_metrics,
 )
 from query_policy import QueryPolicyError
 from traffic_summary_report import TrafficSummaryReportError
@@ -25,6 +30,7 @@ def _row(**overrides):
         "project_id": "my-ga4-project",
         "status": "active",
         "ec": False,
+        "aliases": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -121,6 +127,28 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertIn("NULLIF(TRIM(project_id), '') IS NOT NULL", sql)
         self.assertIn("HAVING COUNT(*) = 1", sql)
 
+    def test_registry_query_supports_aliases_and_partial_candidates(self):
+        client = _client_with_rows(
+            [
+                _row(
+                    tenant_name="東方美企業",
+                    aliases="小太陽|Sunny Digital",
+                    match_type="alias",
+                )
+            ]
+        )
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = get_customer_status("Ｓｕｎｎｙ Digital")
+
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["requested_name"], "Ｓｕｎｎｙ Digital")
+        self.assertEqual(result["match_type"], "alias")
+        sql = client.query.call_args.args[0]
+        self.assertIn("aliases", sql)
+        self.assertIn("UNNEST(SPLIT", sql)
+        self.assertIn("STRPOS(normalized_name, normalized_request)", sql)
+
     def test_active_customer_resolves_to_ga4_mar(self):
         client = _client_with_rows([_row()])
 
@@ -134,6 +162,128 @@ class TenantResolutionTests(unittest.TestCase):
         parameter = kwargs["job_config"].query_parameters[0]
         self.assertEqual(parameter.name, "customer_name")
         self.assertEqual(parameter.value, "維肯媒體部落格")
+
+    def test_exact_alias_resolves_to_formal_tenant_config(self):
+        client = _client_with_rows(
+            [
+                _row(
+                    tenant_name="東方美企業",
+                    aliases="東方美|Orient Beauty",
+                    match_type="alias",
+                )
+            ]
+        )
+
+        tenant = get_tenant_config(client, "Orient Beauty")
+
+        self.assertEqual(tenant["tenant_name"], "東方美企業")
+        self.assertEqual(tenant["requested_name"], "Orient Beauty")
+        self.assertEqual(tenant["resolved_name"], "東方美企業")
+        self.assertEqual(tenant["match_type"], "alias")
+
+    def test_unique_partial_candidate_requires_confirmation_before_data_query(self):
+        client = _client_with_rows(
+            [_row(tenant_name="東方美企業", match_type="partial")]
+        )
+
+        with self.assertRaises(TenantResolutionError) as raised:
+            get_tenant_config(client, "東方美")
+
+        error = raised.exception
+        self.assertEqual(error.code, "tenant_confirmation_required")
+        result = error.as_result()
+        self.assertEqual(result["requested_name"], "東方美")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "partial")
+        self.assertEqual(result["candidates"][0]["resolved_name"], "東方美企業")
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_multiple_partial_candidates_fail_closed_without_data_query(self):
+        client = _client_with_rows(
+            [
+                _row(tenant_name="東方美企業", match_type="partial"),
+                _row(
+                    tenant_id="6",
+                    tenant_name="東方美國際",
+                    match_type="partial",
+                ),
+            ]
+        )
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(TenantResolutionError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="東方美",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        self.assertEqual(raised.exception.code, "ambiguous_tenant")
+        self.assertEqual(raised.exception.as_result()["match_type"], "partial")
+        self.assertEqual(
+            [candidate["resolved_name"] for candidate in raised.exception.candidates],
+            ["東方美企業", "東方美國際"],
+        )
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_broad_partial_candidate_is_not_auto_resolved(self):
+        client = _client_with_rows(
+            [_row(tenant_name="東方美企業", match_type="partial")]
+        )
+
+        with self.assertRaises(TenantResolutionError) as raised:
+            get_tenant_config(client, "美")
+
+        self.assertEqual(raised.exception.code, "customer_name_too_broad")
+        self.assertIsNone(raised.exception.resolved_name)
+
+    def test_mcp_customer_lookup_returns_partial_candidates(self):
+        client = _client_with_rows(
+            [_row(tenant_name="東方美企業", match_type="partial")]
+        )
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = mcp_server.customer_lookup("東方美")
+
+        self.assertEqual(result["status"], "tenant_confirmation_required")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "partial")
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_rest_partial_candidate_returns_conflict_without_data_query(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _row(tenant_name="東方美企業", match_type="partial")
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+
+        main.app.dependency_overrides[main.require_rest_oauth] = lambda: {}
+        try:
+            with (
+                unittest.mock.patch("main.get_bigquery_client", return_value=client),
+                TestClient(main.app) as test_client,
+            ):
+                response = test_client.get(
+                    "/traffic-summary",
+                    params={
+                        "customer_name": "東方美",
+                        "start_date": "2026-08-17",
+                        "end_date": "2026-08-23",
+                    },
+                )
+        finally:
+            main.app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["detail"]["status"],
+            "tenant_confirmation_required",
+        )
+        self.assertEqual(client.query.call_count, 1)
 
     def test_ec_true_resolves_to_ecommerce_profile(self):
         tenant = get_tenant_config(
@@ -186,7 +336,9 @@ class TenantResolutionTests(unittest.TestCase):
         client.query.assert_not_called()
 
     def test_customer_status_does_not_require_analytics_access(self):
-        client = _client_with_rows([_row(project_id="other-project")])
+        client = _client_with_rows(
+            [_row(tenant_name="東方美企業", project_id="other-project")]
+        )
 
         with unittest.mock.patch("main.get_bigquery_client", return_value=client):
             result = get_customer_status("東方美企業")

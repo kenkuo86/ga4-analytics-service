@@ -132,6 +132,31 @@ class TrafficSummaryReportTests(unittest.TestCase):
         )
         self.assertNotIn("time_zone", report["period"])
 
+    def test_contract_preserves_tenant_resolution_context(self):
+        report = build_traffic_summary_report(
+            row=_row(1),
+            tenant={
+                "tenant_id": "5",
+                "tenant_name": "東方美企業",
+                "requested_name": "Orient Beauty",
+                "resolved_name": "東方美企業",
+                "match_type": "alias",
+                "project_id": "customer-project",
+                "dataset_id": "ga4_mar",
+            },
+        )
+
+        self.assertEqual(
+            report["tenant"],
+            {
+                "tenant_id": "5",
+                "tenant_name": "東方美企業",
+                "requested_name": "Orient Beauty",
+                "resolved_name": "東方美企業",
+                "match_type": "alias",
+            },
+        )
+
     def test_one_multi_and_ninety_day_series_are_complete_and_aligned(self):
         for day_count in (1, 7, 90):
             with self.subTest(day_count=day_count):

@@ -10,14 +10,16 @@ from query_policy import QueryPolicy, QueryPolicyError
 from semantic_catalog import SemanticCatalog, SemanticCatalogError, semantic_catalog
 
 
-def _tenant_row(*, ec: bool | None = False):
-    return SimpleNamespace(
-        tenant_id="71",
-        tenant_name="初衣食午股份有限公司",
-        project_id="customer-project",
-        status="active",
-        ec=ec,
-    )
+def _tenant_row(*, ec: bool | None = False, **overrides):
+    values = {
+        "tenant_id": "71",
+        "tenant_name": "初衣食午股份有限公司",
+        "project_id": "customer-project",
+        "status": "active",
+        "ec": ec,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class SemanticCatalogTests(unittest.TestCase):
@@ -191,6 +193,40 @@ class SemanticCatalogTests(unittest.TestCase):
         execution_config = client.query.call_args_list[2].kwargs["job_config"]
         self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
         self.assertTrue(execution_config.use_query_cache)
+
+    def test_generic_query_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        metric_job = Mock()
+        metric_job.result.return_value = [{"total_sessions": 123}]
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, metric_job]
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        self.assertEqual(
+            result["tenant"],
+            {
+                "tenant_id": "71",
+                "tenant_name": "東方美企業",
+                "requested_name": "Orient Beauty",
+                "resolved_name": "東方美企業",
+                "match_type": "alias",
+            },
+        )
 
     def test_multi_metric_query_returns_ordered_query_provenance_on_request(self):
         registry_job = Mock()

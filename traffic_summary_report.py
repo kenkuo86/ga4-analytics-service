@@ -265,15 +265,20 @@ def _build_traffic_summary_report(
         day_count=day_count,
     )
 
+    tenant_result = {
+        "tenant_id": tenant["tenant_id"],
+        "tenant_name": tenant["tenant_name"],
+    }
+    for field_name in ("requested_name", "resolved_name", "match_type"):
+        if field_name in tenant:
+            tenant_result[field_name] = tenant[field_name]
+
     return {
         "status": "ok",
         "report_type": REPORT_TYPE,
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "date_basis": _date_basis(),
-        "tenant": {
-            "tenant_id": tenant["tenant_id"],
-            "tenant_name": tenant["tenant_name"],
-        },
+        "tenant": tenant_result,
         "data_source": {
             "project_id": tenant["project_id"],
             "dataset_id": tenant["dataset_id"],

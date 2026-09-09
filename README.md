@@ -18,7 +18,31 @@ SQL 模板查詢一至五個指標。LLM 不會直接產生或執行任意 SQL�
 告訴我維肯媒體部落格上週的流量摘要。
 ```
 
-名稱解析會忽略前後空白、英文大小寫與 Unicode 相容字元差異，但不會模糊猜測其他客戶。找不到、尚未 active 或名稱重複時，tool 會回傳明確的結構化狀態。
+名稱解析會對正式名稱與受管理 alias 統一套用 trim、Unicode NFKC 與 casefold。
+正式名稱完全符合優先於 exact alias；未登記的部分名稱只會以正式名稱子字串進行
+deterministic candidate search。唯一候選也會要求使用者確認正式名稱，多候選、過短或
+通用名稱不會猜測或查詢 tenant data。找不到、尚未 active、名稱重複或需要確認時，tool
+會回傳保留 `requested_name`、`resolved_name`、`match_type` 的結構化狀態。
+
+PoC 的 tenant registry 使用 `aliases STRING` 欄位；同一客戶的多個 alias 以 ASCII 半形
+`|` 分隔，例如 `小太陽|Sunny Digital|星辰電商`。空白欄位表示沒有 alias；runtime 會
+忽略空項目，但 rollout validation 會拒絕空白 segment、通用公司詞、同 tenant 重複 alias、
+跨 tenant alias 衝突，以及 alias 與其他 tenant 正式名稱衝突。正式名稱字面包含的簡稱
+（例如「東方美」對「東方美企業」）不需要另登記 alias。
+
+在更新 registry 後，先以 registry reader 身分執行只讀 validation；驗證失敗時不得發布
+或讓該 registry 進入可查詢狀態：
+
+```bash
+python scripts/validate_tenant_registry.py \
+  --billing-project ga4-reports-dev \
+  --impersonate-service-account 'RUNTIME_SA_EMAIL' \
+  --output /tmp/ga4-tenant-registry-validation.json
+```
+
+`customer_lookup`、`query_ga4` 與 `traffic_summary` 都接受正式名稱或 exact managed alias。
+部分名稱的候選結果只列出正式名稱與可用狀態；需要確認時，請用候選中的正式名稱重新
+呼叫資料 tool，不要讓模型自行改寫或猜測其他客戶。
 
 Tool result 會附上 registry 解析出的 `project_id` 與固定的 `ga4_mar`
 dataset，供 host model 保留為內部 routing context；使用者不需要知道或提供這些
