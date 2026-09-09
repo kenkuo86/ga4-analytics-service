@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+from pathlib import Path
 import re
 import time
 import unittest
@@ -43,7 +44,7 @@ os.environ.update(
 
 from starlette.testclient import TestClient  # noqa: E402
 
-from capability_registry import SERVER_INSTRUCTIONS, capability_registry  # noqa: E402
+from capability_registry import CAPABILITY_REGISTRY_VERSION, SERVER_INSTRUCTIONS, capability_registry  # noqa: E402
 from mcp_server import app  # noqa: E402
 from oauth_auth import oauth_runtime  # noqa: E402
 
@@ -100,6 +101,22 @@ class OAuthFlowTests(unittest.TestCase):
         return self.client.get("/authorize", params=params, headers=self.headers, follow_redirects=False)
 
     def _authorize_and_consent(self) -> str:
+        _, consent_token = self._get_consent_page()
+
+        consent = self.client.post(
+            "/oauth/consent",
+            data={"consent_token": consent_token, "decision": "approve"},
+            headers=self.headers,
+            follow_redirects=False,
+        )
+        self.assertEqual(consent.status_code, 302, consent.text)
+        redirect = urlparse(consent.headers["location"])
+        self.assertEqual(f"{redirect.scheme}://{redirect.netloc}{redirect.path}", CLAUDE_REDIRECT)
+        query = parse_qs(redirect.query)
+        self.assertEqual(query["state"], ["claude-state"])
+        return query["code"][0]
+
+    def _get_consent_page(self):
         authorize = self._begin_authorization()
         self.assertEqual(authorize.status_code, 302, authorize.text)
         google_query = parse_qs(urlparse(authorize.headers["location"]).query)
@@ -117,19 +134,7 @@ class OAuthFlowTests(unittest.TestCase):
         )
         token_match = re.search(r'name="consent_token" value="([^"]+)"', callback.text)
         self.assertIsNotNone(token_match)
-
-        consent = self.client.post(
-            "/oauth/consent",
-            data={"consent_token": token_match.group(1), "decision": "approve"},
-            headers=self.headers,
-            follow_redirects=False,
-        )
-        self.assertEqual(consent.status_code, 302, consent.text)
-        redirect = urlparse(consent.headers["location"])
-        self.assertEqual(f"{redirect.scheme}://{redirect.netloc}{redirect.path}", CLAUDE_REDIRECT)
-        query = parse_qs(redirect.query)
-        self.assertEqual(query["state"], ["claude-state"])
-        return query["code"][0]
+        return callback, token_match.group(1)
 
     def _exchange_code(self, code: str, **overrides):
         data = {
@@ -317,6 +322,63 @@ class OAuthFlowTests(unittest.TestCase):
         )
         self.assertEqual(reused_refresh.status_code, 400)
         self.assertEqual(reused_refresh.json()["error"], "invalid_grant")
+
+    def test_consent_page_renders_registry_contract_and_security_headers(self):
+        consent_page, _ = self._get_consent_page()
+        self.assertEqual(consent_page.status_code, 200)
+        self.assertEqual(consent_page.headers["cache-control"], "no-store")
+        self.assertEqual(consent_page.headers["referrer-policy"], "no-referrer")
+        self.assertEqual(consent_page.headers["x-frame-options"], "DENY")
+        policy = consent_page.headers["content-security-policy"]
+        self.assertIn("default-src 'none'", policy)
+        self.assertIn("style-src 'unsafe-inline'", policy)
+        self.assertIn("form-action 'self' https://claude.ai", policy)
+        self.assertIn("frame-ancestors 'none'", policy)
+
+        metadata = capability_registry.consent_metadata()
+        self.assertIn(f"Capability registry v{CAPABILITY_REGISTRY_VERSION}", consent_page.text)
+        self.assertIn("ga4:read", consent_page.text)
+        self.assertIn("僅限讀取", consent_page.text)
+        for capability in metadata["supported"]:
+            self.assertIn(capability["label"], consent_page.text)
+            self.assertIn(capability["description"], consent_page.text)
+            for tool in capability["tools"]:
+                self.assertIn(tool, consent_page.text)
+        for item in metadata["unsupported"]:
+            self.assertIn(item["label"], consent_page.text)
+            self.assertIn(item["message"], consent_page.text)
+        for limitation in metadata["limitations"]:
+            self.assertIn(limitation, consent_page.text)
+
+        self.assertIn("query provenance", consent_page.text)
+        self.assertIn("<main class=\"page-shell\">", consent_page.text)
+        self.assertIn('aria-labelledby="page-title"', consent_page.text)
+        self.assertIn('<meta name="viewport"', consent_page.text)
+        self.assertIn("@media (max-width: 520px)", consent_page.text)
+        self.assertIn("button:focus-visible", consent_page.text)
+
+        readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+        self.assertIn("capability_registry.py", readme)
+        for tool in metadata["public_tools"]:
+            self.assertIn(tool, SERVER_INSTRUCTIONS)
+            self.assertIn(tool, readme)
+        for capability in metadata["supported"]:
+            self.assertIn(capability["label"], SERVER_INSTRUCTIONS)
+            self.assertIn(capability["description"], SERVER_INSTRUCTIONS)
+
+    def test_consent_deny_preserves_oauth_redirect_contract(self):
+        _, consent_token = self._get_consent_page()
+        denied = self.client.post(
+            "/oauth/consent",
+            data={"consent_token": consent_token, "decision": "deny"},
+            headers=self.headers,
+            follow_redirects=False,
+        )
+        self.assertEqual(denied.status_code, 302, denied.text)
+        query = parse_qs(urlparse(denied.headers["location"]).query)
+        self.assertEqual(query["error"], ["access_denied"])
+        self.assertEqual(query["state"], ["claude-state"])
+        self.assertEqual(denied.headers["cache-control"], "no-store")
 
     def test_wrong_resource_redirect_and_wrong_callback_rejected(self):
         missing_resource = self._begin_authorization(resource=None)

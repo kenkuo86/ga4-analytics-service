@@ -39,6 +39,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from auth_config import CLAUDE_CALLBACK_URL, OAuthConfig
+from capability_registry import capability_registry
 
 
 GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -428,20 +429,233 @@ class GoogleOAuthAuthorizationServer(
 
     def _consent_page(self, consent_token: str, email: str) -> HTMLResponse:
         action = f"{self.config.issuer_url}/oauth/consent"
+        metadata = capability_registry.consent_metadata()
+        capability_cards = "".join(
+            f"""
+            <li class="capability-card">
+              <div class="capability-card__heading">
+                <h3>{escape(str(capability["label"]))}</h3>
+                <span class="capability-card__status">可用</span>
+              </div>
+              <p>{escape(str(capability["description"]))}</p>
+              <p class="capability-card__tools"><span>公開工具：</span><code>{escape(", ".join(capability["tools"]))}</code></p>
+            </li>
+            """
+            for capability in metadata["supported"]
+        )
+        unsupported_items = "".join(
+            f"""
+            <li>
+              <strong>{escape(str(item["label"]))}</strong>
+              <span>{escape(str(item["message"]))}</span>
+            </li>
+            """
+            for item in metadata["unsupported"]
+        )
+        limitation_items = "".join(
+            f"<li>{escape(str(limitation))}</li>"
+            for limitation in metadata["limitations"]
+        )
+        registry_version = escape(str(metadata["registry_version"]))
+        required_scope = escape(self.config.required_scope)
         content = f"""<!doctype html>
 <html lang="zh-Hant">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>連接 GA4 Analytics</title></head>
-<body style="font-family:system-ui;max-width:560px;margin:48px auto;padding:0 20px;line-height:1.55">
-  <h1>連接 GA4 Analytics</h1>
-  <p>登入帳號：<strong>{escape(email)}</strong></p>
-  <p>Claude 將取得唯讀權限，能呼叫 <code>traffic_summary</code> 查詢已授權 tenant 的 GA4 流量摘要。</p>
-  <form action="{escape(action)}" method="post">
-    <input type="hidden" name="consent_token" value="{escape(consent_token)}">
-    <button name="decision" value="approve" type="submit">允許</button>
-    <button name="decision" value="deny" type="submit">拒絕</button>
-  </form>
-</body></html>"""
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>連接 GA4 Analytics</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --page: #f5f1e9;
+      --card: #fffdf9;
+      --ink: #282725;
+      --muted: #6f6b63;
+      --line: #ded8cc;
+      --soft: #f1ede5;
+      --accent: #2f5149;
+      --accent-hover: #25443d;
+      --deny: #5d5a54;
+      --deny-hover: #45423d;
+    }}
+
+    * {{ box-sizing: border-box; }}
+
+    body {{
+      min-width: 320px;
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }}
+
+    .page-shell {{
+      display: grid;
+      min-height: 100vh;
+      place-items: center;
+      padding: clamp(24px, 7vw, 72px) 16px;
+    }}
+
+    .card {{
+      width: min(100%, 640px);
+      overflow: hidden;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 18px 50px rgb(67 57 43 / 10%);
+    }}
+
+    .card__header {{ padding: 34px 36px 24px; }}
+
+    .eyebrow {{
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }}
+
+    h1, h2, h3, p {{ margin-top: 0; }}
+    h1 {{ margin-bottom: 10px; font-size: clamp(1.75rem, 5vw, 2.15rem); line-height: 1.2; letter-spacing: -0.025em; }}
+    h2 {{ margin-bottom: 14px; font-size: 1rem; line-height: 1.3; }}
+    h3 {{ margin-bottom: 4px; font-size: 0.98rem; line-height: 1.35; }}
+    .intro {{ max-width: 52ch; margin-bottom: 0; color: var(--muted); }}
+
+    .card__body {{ display: grid; gap: 26px; padding: 0 36px 32px; }}
+
+    .account, .scope {{
+      padding: 16px 18px;
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }}
+
+    .field-label {{ margin-bottom: 2px; color: var(--muted); font-size: 0.78rem; font-weight: 700; }}
+    .account__email {{ margin-bottom: 0; overflow-wrap: anywhere; font-weight: 650; }}
+    .scope {{ display: grid; grid-template-columns: minmax(96px, 0.7fr) 1.3fr; gap: 8px 16px; margin: 0; }}
+    .scope dt {{ color: var(--muted); font-size: 0.82rem; font-weight: 700; }}
+    .scope dd {{ margin: 0; font-size: 0.9rem; }}
+    code {{
+      padding: 2px 6px;
+      background: rgb(40 39 37 / 7%);
+      border-radius: 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82em;
+    }}
+
+    .capability-list, .limitation-list, .unsupported-list {{ display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }}
+    .capability-card {{ padding: 15px 16px; border: 1px solid var(--line); border-radius: 11px; }}
+    .capability-card__heading {{ display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }}
+    .capability-card p {{ margin-bottom: 6px; color: var(--muted); font-size: 0.9rem; }}
+    .capability-card__status {{ flex: 0 0 auto; color: var(--accent); font-size: 0.75rem; font-weight: 700; }}
+    .capability-card__tools {{ margin-bottom: 0 !important; }}
+    .capability-card__tools span {{ margin-right: 5px; }}
+    .limitation-list li, .unsupported-list li {{ display: grid; gap: 2px; padding-left: 18px; color: var(--muted); font-size: 0.9rem; }}
+    .limitation-list li::before, .unsupported-list li::before {{
+      position: absolute;
+      margin-left: -17px;
+      color: var(--deny);
+      content: "—";
+    }}
+    .limitation-list li, .unsupported-list li {{ position: relative; }}
+    .unsupported-list strong {{ color: var(--ink); font-size: 0.9rem; }}
+    .audit-note {{ margin: 0; padding: 14px 16px; border-left: 3px solid var(--accent); background: rgb(47 81 73 / 6%); color: var(--muted); font-size: 0.88rem; }}
+    .audit-note strong {{ color: var(--ink); }}
+
+    .card__footer {{ padding: 24px 36px 32px; border-top: 1px solid var(--line); }}
+    .decision-help {{ margin: 0 0 14px; color: var(--muted); font-size: 0.82rem; }}
+    .actions {{ display: grid; grid-template-columns: 1fr 1.25fr; gap: 10px; margin: 0; padding: 0; border: 0; }}
+    button {{
+      min-height: 46px;
+      padding: 10px 16px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }}
+    button:focus-visible {{ outline: 3px solid rgb(47 81 73 / 35%); outline-offset: 3px; }}
+    .button--deny {{ background: transparent; border-color: var(--line); color: var(--deny); }}
+    .button--deny:hover {{ background: var(--soft); border-color: #c8c0b2; color: var(--deny-hover); }}
+    .button--approve {{ background: var(--accent); color: #fffdf9; }}
+    .button--approve:hover {{ background: var(--accent-hover); }}
+    .registry-note {{ margin: 16px 0 0; color: var(--muted); font-size: 0.72rem; text-align: center; }}
+    .sr-only {{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }}
+
+    @media (max-width: 520px) {{
+      .card__header {{ padding: 28px 22px 20px; }}
+      .card__body {{ gap: 22px; padding: 0 22px 26px; }}
+      .card__footer {{ padding: 20px 22px 24px; }}
+      .scope {{ grid-template-columns: 1fr; gap: 2px; }}
+      .scope dd {{ margin-bottom: 8px; }}
+      .scope dd:last-child {{ margin-bottom: 0; }}
+      .actions {{ grid-template-columns: 1fr; }}
+      .button--approve {{ order: -1; }}
+    }}
+
+    @media (prefers-reduced-motion: reduce) {{
+      button {{ transition: none; }}
+    }}
+  </style>
+</head>
+<body>
+  <main class="page-shell">
+    <section class="card" aria-labelledby="page-title" aria-describedby="page-intro">
+      <header class="card__header">
+        <p class="eyebrow">GA4 Analytics Service</p>
+        <h1 id="page-title">連接 GA4 Analytics</h1>
+        <p id="page-intro" class="intro">請確認要讓這個 connector 讀取已授權客戶的 GA4 資料。你可以隨時拒絕這次連接。</p>
+      </header>
+
+      <div class="card__body">
+        <div class="account">
+          <p class="field-label">登入帳號</p>
+          <p class="account__email">{escape(email)}</p>
+        </div>
+
+        <dl class="scope">
+          <dt>權限範圍</dt>
+          <dd><code>{required_scope}</code> · 僅限讀取</dd>
+          <dt>資料類型</dt>
+          <dd>客戶清單與已授權範圍內的 GA4 analytics data</dd>
+        </dl>
+
+        <section aria-labelledby="can-do-title">
+          <h2 id="can-do-title">這個 connector 可以做什麼</h2>
+          <ul class="capability-list">{capability_cards}
+          </ul>
+        </section>
+
+        <section aria-labelledby="limits-title">
+          <h2 id="limits-title">明確限制</h2>
+          <ul class="unsupported-list">{unsupported_items}
+          </ul>
+          <ul class="limitation-list" style="margin-top: 12px;">{limitation_items}
+          </ul>
+        </section>
+
+        <p class="audit-note"><strong>查詢查核：</strong>只有在你明確要求時，才會提供實際 query provenance（SQL、參數與 BigQuery job metadata）。</p>
+      </div>
+
+      <footer class="card__footer">
+        <p id="decision-help" class="decision-help">允許後，connector 會依上述唯讀能力處理查詢；不會取得或執行任意 SQL。</p>
+        <form action="{escape(action)}" method="post">
+          <input type="hidden" name="consent_token" value="{escape(consent_token)}">
+          <fieldset class="actions">
+            <legend class="sr-only">選擇是否允許連接</legend>
+            <button class="button--deny" name="decision" value="deny" type="submit">拒絕並返回</button>
+            <button class="button--approve" name="decision" value="approve" type="submit">允許連接</button>
+          </fieldset>
+        </form>
+        <p class="registry-note">Capability registry v{registry_version}</p>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>"""
         return HTMLResponse(
             content,
             headers={

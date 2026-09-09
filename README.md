@@ -59,6 +59,13 @@ instructions 與 tool descriptions 的 versioned 單一來源。當資料來源�
 時，先呼叫 `get_ga4_capabilities`；它只讀取本機 capability metadata 與 semantic
 catalog，不會建立 BigQuery client，也不會查詢 tenant registry 或 tenant data。
 
+OAuth consent page 也直接使用同一份 registry metadata：`consent_metadata()` 產生可查詢
+能力、公開 tools、unsupported boundaries 與服務限制；`server_instructions()` 產生 MCP
+initialize 時的能力摘要。新增或移除公開 tool／能力時，必須同步更新 registry metadata，
+讓 consent page、MCP tool inventory、server instructions 與本文件維持一致；測試會在 metadata
+與公開 tool 對應遺漏時 fail fast。Consent page 只顯示登入帳號、設定的唯讀 scope、資料類型、
+支援的 GA4 能力與明確限制，不會取得或執行任意 SQL。
+
 Capability resolution 固定區分三種結果：
 
 - `supported`：明確要求 GA4 traffic summary，或同時指明 GA4 與分析 metric 且本機
