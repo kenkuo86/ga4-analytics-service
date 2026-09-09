@@ -181,6 +181,51 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertEqual(tenant["resolved_name"], "東方美企業")
         self.assertEqual(tenant["match_type"], "alias")
 
+    def test_formal_name_takes_precedence_over_alias_match(self):
+        client = _client_with_rows(
+            [
+                _row(
+                    tenant_name="Orient Beauty",
+                    match_type="exact",
+                ),
+                _row(
+                    tenant_id="6",
+                    tenant_name="另一家企業",
+                    aliases="Orient Beauty",
+                    match_type="alias",
+                ),
+            ]
+        )
+
+        tenant = get_tenant_config(client, "Orient Beauty")
+
+        self.assertEqual(tenant["tenant_name"], "Orient Beauty")
+        self.assertEqual(tenant["match_type"], "exact")
+
+    def test_duplicate_alias_matches_fail_closed_at_runtime(self):
+        client = _client_with_rows(
+            [
+                _row(
+                    tenant_name="東方美企業",
+                    aliases="Orient Beauty",
+                    match_type="alias",
+                ),
+                _row(
+                    tenant_id="6",
+                    tenant_name="另一家企業",
+                    aliases="Orient Beauty",
+                    match_type="alias",
+                ),
+            ]
+        )
+
+        with self.assertRaises(TenantResolutionError) as raised:
+            get_tenant_config(client, "Orient Beauty")
+
+        self.assertEqual(raised.exception.code, "ambiguous_tenant")
+        self.assertEqual(raised.exception.match_type, "alias")
+        self.assertEqual(client.query.call_count, 1)
+
     def test_unique_partial_candidate_requires_confirmation_before_data_query(self):
         client = _client_with_rows(
             [_row(tenant_name="東方美企業", match_type="partial")]
