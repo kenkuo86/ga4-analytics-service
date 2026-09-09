@@ -380,6 +380,50 @@ class TenantResolutionTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "invalid_customer_name")
         client.query.assert_not_called()
 
+    def test_invalid_project_id_returns_alias_context_to_rest_and_mcp(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _row(
+                tenant_name="東方美企業",
+                project_id="invalid.project",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+
+        main.app.dependency_overrides[main.require_rest_oauth] = lambda: {}
+        try:
+            with (
+                unittest.mock.patch("main.get_bigquery_client", return_value=client),
+                TestClient(main.app) as test_client,
+            ):
+                mcp_result = mcp_server.query_ga4(
+                    "Orient Beauty",
+                    ["total_sessions"],
+                    "2026-08-17",
+                    "2026-08-23",
+                )
+                response = test_client.get(
+                    "/traffic-summary",
+                    params={
+                        "customer_name": "Orient Beauty",
+                        "start_date": "2026-08-17",
+                        "end_date": "2026-08-23",
+                    },
+                )
+        finally:
+            main.app.dependency_overrides.clear()
+
+        self.assertEqual(response.status_code, 409)
+        for result in (mcp_result, response.json()["detail"]):
+            self.assertEqual(result["status"], "data_unavailable")
+            self.assertEqual(result["requested_name"], "Orient Beauty")
+            self.assertEqual(result["resolved_name"], "東方美企業")
+            self.assertEqual(result["match_type"], "alias")
+        self.assertEqual(client.query.call_count, 2)
+
     def test_customer_status_does_not_require_analytics_access(self):
         client = _client_with_rows(
             [_row(tenant_name="東方美企業", project_id="other-project")]

@@ -153,17 +153,23 @@ def validate_registry_rows(rows: Iterable[Any]) -> dict[str, Any]:
     formal_display: dict[str, str] = {}
     alias_display: dict[str, str] = {}
     tenant_count = 0
+    skipped_unnamed_tenant_count = 0
     alias_count = 0
 
     for index, row in enumerate(rows):
         tenant_count += 1
         tenant_id = _tenant_id(row, index)
         raw_name = _field(row, "tenant_name")
-        if not isinstance(raw_name, str) or not normalize_customer_name(raw_name):
+        if raw_name is None or (
+            isinstance(raw_name, str) and not normalize_customer_name(raw_name)
+        ):
+            skipped_unnamed_tenant_count += 1
+            continue
+        if not isinstance(raw_name, str):
             issues.append(
                 _issue(
                     code="invalid_tenant_name",
-                    message="tenant_name 不得為空白。",
+                    message="tenant_name 必須是 STRING。",
                     tenant_ids=[tenant_id],
                 )
             )
@@ -255,6 +261,8 @@ def validate_registry_rows(rows: Iterable[Any]) -> dict[str, Any]:
     report = {
         "status": "passed" if not issues else "failed",
         "tenant_count": tenant_count,
+        "validated_tenant_count": tenant_count - skipped_unnamed_tenant_count,
+        "skipped_unnamed_tenant_count": skipped_unnamed_tenant_count,
         "alias_count": alias_count,
         "issue_count": len(issues),
         "alias_separator": ALIAS_SEPARATOR,

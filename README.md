@@ -28,7 +28,9 @@ PoC 的 tenant registry 使用 `aliases STRING` 欄位；同一客戶的多個 a
 `|` 分隔，例如 `小太陽|Sunny Digital|星辰電商`。空白欄位表示沒有 alias；runtime 會
 忽略空項目，但 rollout validation 會拒絕空白 segment、通用公司詞、同 tenant 重複 alias、
 跨 tenant alias 衝突，以及 alias 與其他 tenant 正式名稱衝突。正式名稱字面包含的簡稱
-（例如「東方美」對「東方美企業」）不需要另登記 alias。
+（例如「東方美」對「東方美企業」）不需要另登記 alias。沒有 `tenant_name` 的歷史 rows
+不會進入 runtime 可查詢集合，因此 validation 會略過其 aliases，並以
+`skipped_unnamed_tenant_count` 在成功報告中回報略過數量。
 
 在更新 registry 後，先以 registry reader 身分執行只讀 validation；驗證失敗時不得發布
 或讓該 registry 進入可查詢狀態：

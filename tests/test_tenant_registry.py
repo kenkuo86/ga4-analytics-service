@@ -50,6 +50,31 @@ class TenantRegistryTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["tenant_count"], 2)
+        self.assertEqual(report["validated_tenant_count"], 2)
+        self.assertEqual(report["skipped_unnamed_tenant_count"], 0)
+        self.assertEqual(report["alias_count"], 2)
+
+    def test_nameless_rows_are_reported_and_skipped_from_alias_validation(self):
+        report = validate_registry_rows(
+            [
+                _row(),
+                _row(
+                    tenant_id="2",
+                    tenant_name=None,
+                    aliases="東方美企業||公司",
+                ),
+                _row(
+                    tenant_id="3",
+                    tenant_name="   ",
+                    aliases="Orient Beauty",
+                ),
+            ]
+        )
+
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["tenant_count"], 3)
+        self.assertEqual(report["validated_tenant_count"], 1)
+        self.assertEqual(report["skipped_unnamed_tenant_count"], 2)
         self.assertEqual(report["alias_count"], 2)
 
     def test_duplicate_alias_across_tenants_is_rejected(self):

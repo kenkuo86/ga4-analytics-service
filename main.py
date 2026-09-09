@@ -132,10 +132,17 @@ def get_tenant_config(
 
     # table identifier 無法使用 BigQuery query parameter，
     # 所以在放進 SQL 前先限制格式。
-    identifier_pattern = r"^[A-Za-z0-9_\-]+$"
+    identifier_pattern = r"[A-Za-z0-9_\-]+"
 
-    if not re.match(identifier_pattern, row.project_id):
-        raise ValueError("Invalid project_id")
+    if not re.fullmatch(identifier_pattern, row.project_id):
+        raise TenantResolutionError(
+            "data_unavailable",
+            requested_name,
+            f"客戶「{row.tenant_name}」的 GA4 BigQuery 專案設定無效。",
+            requested_name=requested_name,
+            resolved_name=resolved_name,
+            match_type=match_type,
+        )
 
     return {
         "tenant_id": row.tenant_id,
