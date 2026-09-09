@@ -10,14 +10,16 @@ from query_policy import QueryPolicy, QueryPolicyError
 from semantic_catalog import SemanticCatalog, SemanticCatalogError, semantic_catalog
 
 
-def _tenant_row(*, ec: bool | None = False):
-    return SimpleNamespace(
-        tenant_id="71",
-        tenant_name="初衣食午股份有限公司",
-        project_id="customer-project",
-        status="active",
-        ec=ec,
-    )
+def _tenant_row(*, ec: bool | None = False, **overrides):
+    values = {
+        "tenant_id": "71",
+        "tenant_name": "初衣食午股份有限公司",
+        "project_id": "customer-project",
+        "status": "active",
+        "ec": ec,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class SemanticCatalogTests(unittest.TestCase):
@@ -192,6 +194,175 @@ class SemanticCatalogTests(unittest.TestCase):
         self.assertEqual(execution_config.maximum_bytes_billed, 2_000_000_000)
         self.assertTrue(execution_config.use_query_cache)
 
+    def test_generic_query_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        metric_job = Mock()
+        metric_job.result.return_value = [{"total_sessions": 123}]
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, metric_job]
+
+        with unittest.mock.patch("main.get_bigquery_client", return_value=client):
+            result = query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        self.assertEqual(
+            result["tenant"],
+            {
+                "tenant_id": "71",
+                "tenant_name": "東方美企業",
+                "requested_name": "Orient Beauty",
+                "resolved_name": "東方美企業",
+                "match_type": "alias",
+            },
+        )
+
+    def test_profile_resolution_error_preserves_alias_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["aov"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "unsupported_metric")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_query_compilation_error_preserves_alias_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+        compile_error = SemanticCatalogError(
+            "catalog_compile_failed",
+            "catalog query compilation failed",
+        )
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            unittest.mock.patch.object(
+                semantic_catalog,
+                "compile_sql",
+                side_effect=compile_error,
+            ),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "catalog_compile_failed")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_generic_query_policy_preflight_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.side_effect = [
+            registry_job,
+            SimpleNamespace(total_bytes_processed=2_000_000_001),
+        ]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "query_cost_limit_exceeded")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+
+    def test_generic_query_policy_execution_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.side_effect = [registry_job, SimpleNamespace(total_bytes_processed=1)]
+        policy_error = QueryPolicyError("query_timeout", "temporary failure")
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            unittest.mock.patch(
+                "query_policy.QueryPolicy.execute",
+                side_effect=policy_error,
+            ),
+            self.assertRaises(QueryPolicyError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "query_timeout")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+
     def test_multi_metric_query_returns_ordered_query_provenance_on_request(self):
         registry_job = Mock()
         registry_job.result.return_value = [_tenant_row()]
@@ -262,7 +433,13 @@ class SemanticCatalogTests(unittest.TestCase):
 
     def test_failed_metric_query_keeps_structured_provenance(self):
         registry_job = Mock()
-        registry_job.result.return_value = [_tenant_row()]
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
         dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
         failed_job = Mock()
         failed_job.job_id = "job-failed"
@@ -278,7 +455,7 @@ class SemanticCatalogTests(unittest.TestCase):
             self.assertRaises(SemanticCatalogError) as raised,
         ):
             query_ga4_semantic_metrics(
-                customer_name="初衣食午股份有限公司",
+                customer_name="Orient Beauty",
                 metric_ids=["total_sessions"],
                 start_date="2026-08-17",
                 end_date="2026-08-23",
@@ -286,7 +463,11 @@ class SemanticCatalogTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "data_unavailable")
-        provenance = raised.exception.as_result()["details"]["query_provenance"]
+        result = raised.exception.as_result()
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        provenance = result["details"]["query_provenance"]
         self.assertEqual(provenance["queries"][0]["status"], "failed")
         self.assertEqual(provenance["queries"][0]["job_id"], "job-failed")
         self.assertEqual(provenance["queries"][0]["bytes_billed"], 5_000_000)
@@ -338,6 +519,50 @@ class SemanticCatalogTests(unittest.TestCase):
         self.assertEqual(query["bytes_processed"], 7_000_000)
         self.assertEqual(query["bytes_billed"], 6_000_000)
 
+    def test_failed_alias_metric_row_serialization_preserves_context(self):
+        class BadRow:
+            def items(self):
+                raise RuntimeError("row serialization failed")
+
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        metric_job = Mock()
+        metric_job.job_id = "job-serialization-failed"
+        metric_job.cache_hit = False
+        metric_job.total_bytes_processed = 5_000_000
+        metric_job.total_bytes_billed = 5_000_000
+        metric_job.result.return_value = [BadRow()]
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, metric_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+                include_query=True,
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "data_unavailable")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        query = result["details"]["query_provenance"]["queries"][0]
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(query["job_id"], "job-serialization-failed")
+
     def test_generic_query_uses_ecommerce_profile_from_registry(self):
         registry_job = Mock()
         registry_job.result.return_value = [_tenant_row(ec=True)]
@@ -371,6 +596,16 @@ class SemanticCatalogTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "invalid_date_range")
+        self.assertEqual(
+            raised.exception.as_result(),
+            {
+                "status": "invalid_date_range",
+                "message": "start_date 不得晚於 end_date。",
+                "requested_name": "初衣食午股份有限公司",
+                "resolved_name": None,
+                "match_type": "none",
+            },
+        )
 
     def test_multi_metric_request_limit_blocks_all_data_queries(self):
         registry_job = Mock()

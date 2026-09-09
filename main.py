@@ -21,6 +21,12 @@ from query_policy import (
     query_policy,
 )
 from semantic_catalog import SemanticCatalogError, semantic_catalog
+from tenant_context import TenantContextErrorMixin, TenantRequestContext
+from tenant_registry import (
+    ALIAS_SEPARATOR,
+    is_broad_customer_search,
+    normalize_customer_name,
+)
 from traffic_summary_report import (
     TrafficSummaryReportError,
     build_traffic_summary_report,
@@ -32,15 +38,34 @@ app = FastAPI()
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
 
 
-class TenantResolutionError(ValueError):
+class TenantResolutionError(TenantContextErrorMixin, ValueError):
     """A customer name could not be resolved to one active tenant."""
 
-    def __init__(self, code: str, customer_name: str, message: str):
+    def __init__(
+        self,
+        code: str,
+        customer_name: str,
+        message: str,
+        *,
+        requested_name: str | None = None,
+        resolved_name: str | None = None,
+        match_type: str = "none",
+        candidates: list[dict[str, Any]] | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.customer_name = customer_name
         self.message = message
-        self.details: dict[str, Any] = {}
+        self._init_tenant_context(
+            requested_name=(
+                requested_name if requested_name is not None else customer_name
+            ),
+            resolved_name=resolved_name,
+            match_type=match_type,
+        )
+        self.candidates = candidates or []
+        self.details = details or {}
 
     def as_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -48,6 +73,9 @@ class TenantResolutionError(ValueError):
             "customer_name": self.customer_name,
             "message": self.message,
         }
+        result.update(self.tenant_context_result())
+        if self.candidates:
+            result["candidates"] = self.candidates
         if self.details:
             result["details"] = self.details
         return result
@@ -76,36 +104,55 @@ def get_tenant_config(
     customer_name: str,
 ):
     """
-    根據 registry 中的正式客戶名稱取得 GA4 BigQuery 的位置。
+    根據 registry 中的正式名稱或 exact managed alias 取得 GA4 BigQuery 的位置。
     """
 
-    row, customer_name = get_tenant_record(client, customer_name)
+    row, requested_name, resolved_name, match_type = _resolve_tenant_record(
+        client,
+        customer_name,
+    )
     tenant_status = (row.status or "").strip().lower()
 
     if tenant_status != "active":
         raise TenantResolutionError(
             "tenant_inactive",
-            customer_name,
+            requested_name,
             f"客戶「{row.tenant_name}」存在，但目前狀態為 {tenant_status or '未設定'}，尚未開放查詢。",
+            requested_name=requested_name,
+            resolved_name=row.tenant_name,
+            match_type=match_type,
         )
 
     if not row.project_id:
         raise TenantResolutionError(
             "data_unavailable",
-            customer_name,
+            requested_name,
             f"客戶「{row.tenant_name}」存在，但尚未設定 GA4 BigQuery 專案。",
+            requested_name=requested_name,
+            resolved_name=row.tenant_name,
+            match_type=match_type,
         )
 
     # table identifier 無法使用 BigQuery query parameter，
     # 所以在放進 SQL 前先限制格式。
-    identifier_pattern = r"^[A-Za-z0-9_\-]+$"
+    identifier_pattern = r"[A-Za-z0-9_\-]+"
 
-    if not re.match(identifier_pattern, row.project_id):
-        raise ValueError("Invalid project_id")
+    if not re.fullmatch(identifier_pattern, row.project_id):
+        raise TenantResolutionError(
+            "data_unavailable",
+            requested_name,
+            f"客戶「{row.tenant_name}」的 GA4 BigQuery 專案設定無效。",
+            requested_name=requested_name,
+            resolved_name=resolved_name,
+            match_type=match_type,
+        )
 
     return {
         "tenant_id": row.tenant_id,
         "tenant_name": row.tenant_name,
+        "requested_name": requested_name,
+        "resolved_name": resolved_name,
+        "match_type": match_type,
         "project_id": row.project_id,
         "dataset_id": "ga4_mar",
         # Registry policy: only literal TRUE means ecommerce. FALSE and blank
@@ -114,28 +161,183 @@ def get_tenant_config(
     }
 
 
-def get_tenant_record(client: bigquery.Client, customer_name: str):
-    """Resolve an exact registered name without requiring analytics access."""
+def _registry_row_value(row: Any, name: str, default: Any = None) -> Any:
+    if isinstance(row, dict):
+        return row.get(name, default)
+    return getattr(row, name, default)
 
-    customer_name = customer_name.strip()
-    if not customer_name:
+
+def _registry_match_type(row: Any, requested_normalized: str) -> str:
+    explicit_match_type = _registry_row_value(row, "match_type")
+    if explicit_match_type:
+        return str(explicit_match_type)
+    formal_name = _registry_row_value(row, "tenant_name", "")
+    if isinstance(formal_name, str):
+        normalized_formal_name = normalize_customer_name(formal_name)
+        if normalized_formal_name == requested_normalized:
+            return "exact"
+        aliases = _registry_row_value(row, "aliases")
+        if isinstance(aliases, str):
+            if requested_normalized in {
+                normalize_customer_name(alias)
+                for alias in aliases.split(ALIAS_SEPARATOR)
+                if alias.strip()
+            }:
+                return "alias"
+        if requested_normalized in normalized_formal_name:
+            return "partial"
+    return "partial"
+
+
+def _candidate_summary(row: Any) -> dict[str, Any]:
+    tenant_name = _registry_row_value(row, "tenant_name")
+    status = (_registry_row_value(row, "status", "") or "").strip().lower()
+    project_id = _registry_row_value(row, "project_id")
+    return {
+        "tenant_name": tenant_name,
+        "resolved_name": tenant_name,
+        "tenant_status": status or "unset",
+        "analytics_available": status == "active" and bool(project_id),
+    }
+
+
+def _raise_candidate_error(
+    *,
+    requested_name: str,
+    candidates: list[Any],
+) -> None:
+    candidate_results = [_candidate_summary(row) for row in candidates]
+    if is_broad_customer_search(requested_name):
+        raise TenantResolutionError(
+            "customer_name_too_broad",
+            requested_name,
+            f"客戶名稱「{requested_name}」過短或過於通用，請提供更完整的正式名稱。",
+            requested_name=requested_name,
+            match_type="partial",
+            candidates=candidate_results,
+        )
+    if len(candidates) == 1:
+        resolved_name = _registry_row_value(candidates[0], "tenant_name")
+        raise TenantResolutionError(
+            "tenant_confirmation_required",
+            requested_name,
+            f"「{requested_name}」可能是客戶「{resolved_name}」，請確認正式名稱後再查詢。",
+            requested_name=requested_name,
+            resolved_name=resolved_name,
+            match_type="partial",
+            candidates=candidate_results,
+        )
+    raise TenantResolutionError(
+        "ambiguous_tenant",
+        requested_name,
+        f"客戶名稱「{requested_name}」對應多個候選，請確認正式名稱後再查詢。",
+        requested_name=requested_name,
+        match_type="partial",
+        candidates=candidate_results,
+    )
+
+
+def _resolve_tenant_record(
+    client: bigquery.Client,
+    customer_name: str,
+):
+    """Resolve formal name, exact alias, or return safe partial candidates."""
+
+    if not isinstance(customer_name, str):
         raise TenantResolutionError(
             "invalid_customer_name",
-            customer_name,
+            str(customer_name),
             "請提供客戶名稱。",
+        )
+    requested_name = customer_name.strip()
+    requested_normalized = normalize_customer_name(requested_name)
+    if not requested_normalized:
+        raise TenantResolutionError(
+            "invalid_customer_name",
+            requested_name,
+            "請提供客戶名稱。",
+            requested_name=requested_name,
         )
 
     sql = f"""
+    WITH named_tenants AS (
+      SELECT
+        tenant_id,
+        tenant_name,
+        project_id,
+        status,
+        ec,
+        aliases,
+        NORMALIZE_AND_CASEFOLD(TRIM(tenant_name), NFKC) AS normalized_name,
+        NORMALIZE_AND_CASEFOLD(@customer_name, NFKC) AS normalized_request
+      FROM `{REGISTRY_TABLE}`
+      WHERE NULLIF(TRIM(tenant_name), '') IS NOT NULL
+    ),
+    alias_matches AS (
+      SELECT
+        tenant_id,
+        tenant_name,
+        project_id,
+        status,
+        ec,
+        aliases,
+        normalized_name,
+        'alias' AS match_type
+      FROM named_tenants
+      CROSS JOIN UNNEST(SPLIT(COALESCE(aliases, ''), '{ALIAS_SEPARATOR}')) AS alias
+      WHERE NULLIF(TRIM(alias), '') IS NOT NULL
+        AND NORMALIZE_AND_CASEFOLD(TRIM(alias), NFKC) = normalized_request
+    ),
+    matches AS (
+      SELECT
+        tenant_id,
+        tenant_name,
+        project_id,
+        status,
+        ec,
+        aliases,
+        normalized_name,
+        'exact' AS match_type,
+        0 AS match_order
+      FROM named_tenants
+      WHERE normalized_name = normalized_request
+      UNION ALL
+      SELECT
+        tenant_id,
+        tenant_name,
+        project_id,
+        status,
+        ec,
+        aliases,
+        normalized_name,
+        match_type,
+        1 AS match_order
+      FROM alias_matches
+      UNION ALL
+      SELECT
+        tenant_id,
+        tenant_name,
+        project_id,
+        status,
+        ec,
+        aliases,
+        normalized_name,
+        'partial' AS match_type,
+        2 AS match_order
+      FROM named_tenants
+      WHERE STRPOS(normalized_name, normalized_request) > 0
+    )
     SELECT
       tenant_id,
       tenant_name,
       project_id,
       status,
-      ec
-    FROM `{REGISTRY_TABLE}`
-    WHERE NORMALIZE_AND_CASEFOLD(TRIM(tenant_name), NFKC)
-      = NORMALIZE_AND_CASEFOLD(@customer_name, NFKC)
-    LIMIT 2
+      ec,
+      aliases,
+      match_type
+    FROM matches
+    ORDER BY match_order, normalized_name, tenant_id
+    LIMIT 22
     """
 
     job_config = bigquery.QueryJobConfig(
@@ -143,7 +345,7 @@ def get_tenant_record(client: bigquery.Client, customer_name: str):
             bigquery.ScalarQueryParameter(
                 "customer_name",
                 "STRING",
-                customer_name,
+                requested_name,
             )
         ]
     )
@@ -158,37 +360,90 @@ def get_tenant_record(client: bigquery.Client, customer_name: str):
     except Exception as error:
         mapped_error = query_policy.map_bigquery_error(error)
         if mapped_error is not None:
+            mapped_error.attach_request_context(
+                TenantRequestContext.from_customer_name(requested_name)
+            )
             raise mapped_error from error
         raise
+
+    typed_rows = [
+        (row, _registry_match_type(row, requested_normalized))
+        for row in rows
+    ]
+    exact_rows = [row for row, match_type in typed_rows if match_type == "exact"]
+    if exact_rows:
+        if len(exact_rows) > 1:
+            raise TenantResolutionError(
+                "ambiguous_tenant",
+                requested_name,
+                f"客戶名稱「{requested_name}」對應到多筆 tenant，請聯絡管理者修正 registry。",
+                requested_name=requested_name,
+                match_type="exact",
+                candidates=[_candidate_summary(row) for row in exact_rows],
+            )
+        row = exact_rows[0]
+        return row, requested_name, _registry_row_value(row, "tenant_name"), "exact"
+
+    alias_rows = [row for row, match_type in typed_rows if match_type == "alias"]
+    if alias_rows:
+        if len(alias_rows) > 1:
+            raise TenantResolutionError(
+                "ambiguous_tenant",
+                requested_name,
+                f"alias「{requested_name}」對應到多個 tenant，請聯絡管理者修正 registry。",
+                requested_name=requested_name,
+                match_type="alias",
+                candidates=[_candidate_summary(row) for row in alias_rows],
+            )
+        row = alias_rows[0]
+        return row, requested_name, _registry_row_value(row, "tenant_name"), "alias"
+
+    partial_rows = [row for row, match_type in typed_rows if match_type == "partial"]
+    if partial_rows:
+        _raise_candidate_error(
+            requested_name=requested_name,
+            candidates=partial_rows,
+        )
 
     if not rows:
         raise TenantResolutionError(
             "tenant_not_found",
-            customer_name,
-            f"tenant registry 中不存在客戶「{customer_name}」。",
+            requested_name,
+            f"tenant registry 中不存在客戶「{requested_name}」。",
+            requested_name=requested_name,
         )
 
-    if len(rows) > 1:
-        raise TenantResolutionError(
-            "ambiguous_tenant",
-            customer_name,
-            f"客戶名稱「{customer_name}」對應到多筆 tenant，請聯絡管理者修正 registry。",
-        )
+    raise TenantResolutionError(
+        "tenant_not_found",
+        requested_name,
+        f"tenant registry 中不存在客戶「{requested_name}」。",
+        requested_name=requested_name,
+    )
 
-    return rows[0], customer_name
+
+def get_tenant_record(client: bigquery.Client, customer_name: str):
+    """Compatibility wrapper returning a resolved row and requested name."""
+
+    row, requested_name, _, _ = _resolve_tenant_record(client, customer_name)
+    return row, requested_name
 
 
 def get_customer_status(customer_name: str) -> dict:
     """Report registry existence independently from GA4 dataset availability."""
 
     client = get_bigquery_client()
-    row, requested_name = get_tenant_record(client, customer_name)
+    row, requested_name, resolved_name, match_type = _resolve_tenant_record(
+        client,
+        customer_name,
+    )
     tenant_status = (row.status or "").strip().lower()
     analytics_available = tenant_status == "active" and bool(row.project_id)
     return {
         "status": "customer_found",
         "customer_name": row.tenant_name,
         "requested_name": requested_name,
+        "resolved_name": resolved_name,
+        "match_type": match_type,
         "tenant_status": tenant_status or "unset",
         "analytics_available": analytics_available,
         "semantic_profile": "ecommerce" if row.ec is True else "non_ecommerce",
@@ -325,6 +580,37 @@ def query_ga4_semantic_metrics(
 ) -> dict[str, Any]:
     """Execute catalog-approved metric SQL for one resolved tenant."""
 
+    request_context = TenantRequestContext.from_customer_name(customer_name)
+    try:
+        return _query_ga4_semantic_metrics(
+            customer_name=customer_name,
+            metric_ids=metric_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            include_query=include_query,
+            request_context=request_context,
+        )
+    except (
+        TenantResolutionError,
+        QueryPolicyError,
+        SemanticCatalogError,
+    ) as error:
+        error.attach_request_context(request_context)
+        raise
+
+
+def _query_ga4_semantic_metrics(
+    customer_name: str,
+    metric_ids: list[str],
+    start_date: str,
+    end_date: str,
+    limit: int,
+    include_query: bool,
+    request_context: TenantRequestContext,
+) -> dict[str, Any]:
+    """Execute catalog-approved metric SQL for one resolved tenant."""
+
     if not isinstance(metric_ids, list) or not metric_ids:
         raise SemanticCatalogError(
             "invalid_metric_request",
@@ -356,6 +642,7 @@ def query_ga4_semantic_metrics(
     result_limit = max(1, min(int(limit), 200))
     client = get_bigquery_client()
     tenant = get_tenant_config(client, customer_name)
+    request_context.resolve_from_tenant(tenant)
     resolved_profile, _ = semantic_catalog.resolve_profile(
         normalized_metric_ids,
         tenant["semantic_profile"],
@@ -434,6 +721,24 @@ def query_ga4_semantic_metrics(
         try:
             query_job, rows = query_policy.execute(client, item["query"])
             rows = list(rows)
+            truncated = len(rows) > result_limit
+            serialized_rows = [
+                _serialize_bigquery_value(dict(row.items()))
+                for row in rows[:result_limit]
+            ]
+            metric_results.append(
+                {
+                    "metric_id": metric_id,
+                    "label": metric["label"],
+                    "main_metric": metric["main_metric"],
+                    "category": metric["category"],
+                    "dimensions": metric["dimensions"],
+                    "date_scope": item["date_scope"],
+                    "row_count": len(serialized_rows),
+                    "truncated": truncated,
+                    "rows": serialized_rows,
+                }
+            )
         except QueryPolicyError as error:
             records = [
                 *executed_records,
@@ -500,30 +805,14 @@ def query_ga4_semantic_metrics(
             )
         )
 
-        truncated = len(rows) > result_limit
-        serialized_rows = [
-            _serialize_bigquery_value(dict(row.items()))
-            for row in rows[:result_limit]
-        ]
-        metric_results.append(
-            {
-                "metric_id": metric_id,
-                "label": metric["label"],
-                "main_metric": metric["main_metric"],
-                "category": metric["category"],
-                "dimensions": metric["dimensions"],
-                "date_scope": item["date_scope"],
-                "row_count": len(serialized_rows),
-                "truncated": truncated,
-                "rows": serialized_rows,
-            }
-        )
-
     result = {
         "status": "ok",
         "tenant": {
             "tenant_id": tenant["tenant_id"],
             "tenant_name": tenant["tenant_name"],
+            "requested_name": tenant["requested_name"],
+            "resolved_name": tenant["resolved_name"],
+            "match_type": tenant["match_type"],
         },
         "data_source": {
             "project_id": tenant["project_id"],
@@ -551,6 +840,33 @@ def get_traffic_summary(
     end_date: str,
     include_query: bool = False,
 ):
+    """Build one traffic summary with consistent tenant error context."""
+
+    request_context = TenantRequestContext.from_customer_name(customer_name)
+    try:
+        return _get_traffic_summary(
+            customer_name=customer_name,
+            start_date=start_date,
+            end_date=end_date,
+            include_query=include_query,
+            request_context=request_context,
+        )
+    except (
+        TenantResolutionError,
+        QueryPolicyError,
+        TrafficSummaryReportError,
+    ) as error:
+        error.attach_request_context(request_context)
+        raise
+
+
+def _get_traffic_summary(
+    customer_name: str,
+    start_date: str,
+    end_date: str,
+    include_query: bool,
+    request_context: TenantRequestContext,
+):
     parsed_start, parsed_end = query_policy.validate_date_range(
         start_date,
         end_date,
@@ -562,6 +878,7 @@ def get_traffic_summary(
         client=client,
         customer_name=customer_name,
     )
+    request_context.resolve_from_tenant(tenant)
 
     sql_path = (
         Path(__file__).parent
@@ -637,6 +954,9 @@ def get_traffic_summary(
             "data_unavailable",
             customer_name,
             f"客戶「{tenant['tenant_name']}」存在於 tenant registry，但目前無法取得 GA4 流量資料。",
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
         )
         _attach_provenance_if_requested(
             mapped_error,

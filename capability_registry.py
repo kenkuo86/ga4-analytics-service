@@ -24,12 +24,17 @@ class UnsupportedIntent:
 
 PUBLIC_TOOL_DESCRIPTIONS = {
     "customer_lookup": """
-Check whether an exact customer name exists in the tenant registry.
+Check whether a customer name, registered alias, or safe partial candidate
+exists in the tenant registry.
 
 Use this tool whenever the user asks whether a customer exists. This lookup
 does not require access to the customer's GA4 dataset. A customer can exist
 even when analytics_available is false. If the result is tenant_not_found,
-do not claim that a similar customer exists and do not guess another name.
+do not claim that a similar customer exists and do not guess another name. A
+tenant_confirmation_required or ambiguous_tenant result contains candidate
+formal names; ask the user to confirm one of those names before querying data.
+The server accepts an exact formal name or an exact managed alias. A partial
+name is candidate search only and never authorizes a data query by itself.
 When configured, data_source contains the project_id and dataset_id for
 internal routing. Never ask the user to provide either identifier.
 """.strip(),
@@ -67,13 +72,16 @@ or non_ecommerce only when the website type is already known. This tool reads
 definitions only; it does not query the tenant registry or customer data.
 """.strip(),
     "query_ga4": """
-Query one to five published GA4 semantic metrics for a customer and period.
+Query one to five published GA4 semantic metrics for a customer's registered
+formal name or exact managed alias and period.
 
 metric_ids must come from search_ga4_metrics; never invent IDs. Even if the
 model skips search, the server validates that all IDs have a publishable local
 catalog profile before it creates a BigQuery client or queries the tenant
-registry. It then resolves project_id, dataset_id, and ecommerce profile from
-the registry and compiles only catalog-approved SQL. It never accepts raw
+registry. It then resolves a registered formal name or exact alias, followed
+by project_id, dataset_id, and ecommerce profile from the registry, and compiles
+only catalog-approved SQL. A partial name only returns safe candidates and
+requires formal-name confirmation; it never authorizes a data query. It never accepts raw
 table, column, filter, group by, profile, or SQL input. Present only rows
 returned with status ok and retain routing metadata as internal context.
 Respect each metric's date_scope: do not describe an all_available_data result
@@ -87,7 +95,8 @@ the natural-language request. The default false keeps this provenance out of
 the normal compact result.
 """.strip(),
     "traffic_summary": """
-Get GA4 traffic summary by the customer's registered name and date range.
+Get GA4 traffic summary by the customer's registered formal name or exact
+managed alias and date range.
 
 Returns current period, previous period, and percentage change for total
 sessions, total users, new users, and returning users. When status is ok,
@@ -98,8 +107,11 @@ preserve its source-date x-axis and day_index comparison alignment,
 and do not replace the report with a table, infer values, or add another
 series. Always use the customer name stated by the user. If the result status
 is tenant_not_found, tell the user that the customer does not exist in the
-tenant registry. If status is tenant_inactive, explain that the customer exists
-but is not currently available. Never guess a different customer. The result
+tenant registry. If status is tenant_confirmation_required, customer_name_too_broad,
+or ambiguous_tenant with candidates, ask the user to confirm a listed formal
+name and do not retry with a guessed name. If status is tenant_inactive, explain
+that the customer exists but is not currently available. Never guess a different
+customer. The result
 includes data_source routing metadata; retain it as context and never ask the user for project_id
 or dataset_id. For supported follow-up analyses such as source, medium, or
 campaign, use search_ga4_metrics and query_ga4 rather than claiming arbitrary
@@ -119,6 +131,12 @@ customer name from the conversation in each data tool call; tool results
 include data_source routing metadata when it is configured. Treat tenant_id,
 project_id, and dataset_id as internal metadata and do not show them in the
 answer unless the user explicitly asks for technical routing details.
+
+An exact registered formal name is resolved before an exact managed alias.
+Unregistered partial names only produce deterministic formal-name candidates.
+Even one candidate requires the user to confirm the displayed formal name;
+multiple or overly broad candidates must be shown without querying tenant data.
+Never let a fuzzy or semantic name match authorize a data query.
 
 When the requested data source or analysis type is uncertain, first call
 get_ga4_capabilities. It performs local metadata lookup only. Follow its

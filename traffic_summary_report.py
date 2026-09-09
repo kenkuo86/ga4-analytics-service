@@ -5,6 +5,8 @@ from decimal import Decimal
 import math
 from typing import Any, Mapping, Sequence
 
+from tenant_context import TenantContextErrorMixin, TenantRequestContext
+
 
 REPORT_TYPE = "traffic_summary"
 REPORT_SCHEMA_VERSION = "1.0.0"
@@ -50,7 +52,7 @@ _SERIES = (
 )
 
 
-class TrafficSummaryReportError(RuntimeError):
+class TrafficSummaryReportError(TenantContextErrorMixin, RuntimeError):
     """The query result could not be represented by the public report contract."""
 
     def __init__(self, *, details: dict[str, Any] | None = None) -> None:
@@ -58,15 +60,32 @@ class TrafficSummaryReportError(RuntimeError):
         self.code = REPORT_CONTRACT_ERROR_CODE
         self.message = REPORT_CONTRACT_ERROR_MESSAGE
         self.details = details or {}
+        self._init_tenant_context()
 
     def as_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": self.code,
             "message": self.message,
         }
+        result.update(self.tenant_context_result())
         if self.details:
             result["details"] = self.details
         return result
+
+
+def _attach_tenant_context(
+    error: TrafficSummaryReportError,
+    tenant: Mapping[str, Any],
+) -> None:
+    context_fields = ("requested_name", "resolved_name", "match_type")
+    if all(field_name in tenant for field_name in context_fields):
+        error.attach_request_context(
+            TenantRequestContext(
+                requested_name=tenant["requested_name"],
+                resolved_name=tenant["resolved_name"],
+                match_type=tenant["match_type"],
+            )
+        )
 
 
 def _field(value: Any, name: str) -> Any:
@@ -265,15 +284,20 @@ def _build_traffic_summary_report(
         day_count=day_count,
     )
 
+    tenant_result = {
+        "tenant_id": tenant["tenant_id"],
+        "tenant_name": tenant["tenant_name"],
+    }
+    for field_name in ("requested_name", "resolved_name", "match_type"):
+        if field_name in tenant:
+            tenant_result[field_name] = tenant[field_name]
+
     return {
         "status": "ok",
         "report_type": REPORT_TYPE,
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "date_basis": _date_basis(),
-        "tenant": {
-            "tenant_id": tenant["tenant_id"],
-            "tenant_name": tenant["tenant_name"],
-        },
+        "tenant": tenant_result,
         "data_source": {
             "project_id": tenant["project_id"],
             "dataset_id": tenant["dataset_id"],
@@ -312,7 +336,10 @@ def build_traffic_summary_report(
             row=row,
             tenant=tenant,
         )
-    except TrafficSummaryReportError:
+    except TrafficSummaryReportError as error:
+        _attach_tenant_context(error, tenant)
         raise
     except Exception as error:
-        raise TrafficSummaryReportError() from error
+        report_error = TrafficSummaryReportError()
+        _attach_tenant_context(report_error, tenant)
+        raise report_error from error
