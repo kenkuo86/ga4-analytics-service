@@ -124,7 +124,7 @@ default false keeps SQL and provenance out of the normal result.
 }
 
 
-SERVER_INSTRUCTIONS = """
+_SERVER_INSTRUCTIONS_BASE = """
 This server resolves every customer name through the tenant registry. Users
 never need to know or provide tenant_id, project_id, or dataset_id. Use the
 customer name from the conversation in each data tool call; tool results
@@ -186,12 +186,53 @@ never claim a catalog metric was queried unless a tool returned status ok.
 """.strip()
 
 
+SUPPORTED_CAPABILITIES = (
+    {
+        "capability_id": "capability_lookup",
+        "label": "能力預檢",
+        "description": "在查詢客戶資料前，先確認請求是否屬於這個 connector 支援的 GA4 分析。",
+        "data_source": "local_metadata",
+        "tools": ("get_ga4_capabilities",),
+    },
+    {
+        "capability_id": "customer_discovery",
+        "label": "客戶清單與辨識",
+        "description": "列出目前可查詢的客戶，並辨識正式名稱與已設定的受管理簡稱。",
+        "data_source": "tenant_registry",
+        "tools": ("customer_lookup", "list_available_customers"),
+    },
+    {
+        "capability_id": "ga4_traffic_summary",
+        "label": "GA4 流量摘要",
+        "description": "查詢 sessions、users、new users 與 returning users 的期間摘要及每日序列。",
+        "data_source": "ga4",
+        "tools": ("traffic_summary",),
+    },
+    {
+        "capability_id": "ga4_semantic_metrics",
+        "label": "已發布的 GA4 metrics",
+        "description": "搜尋並查詢 semantic catalog 中已發布的唯讀 GA4 metrics；需要時可提供 query provenance。",
+        "data_source": "ga4",
+        "tools": ("search_ga4_metrics", "query_ga4"),
+    },
+)
+
+
+CONSENT_LIMITATIONS = (
+    "GA4 semantic catalog 中已發布的唯讀 metrics。",
+    "客戶、profile、project 與 dataset 只能由 tenant registry 解析。",
+    "日期、單一 job、request 合計、timeout 與每日 BigQuery quota 均有服務端限制。",
+    "不接受任意 BigQuery 或 SQL，也不提供資料新增、修改或刪除。",
+)
+
+
 class CapabilityRegistry:
     """Versioned, local source of truth for connector capability boundaries."""
 
     def __init__(self, catalog: SemanticCatalog):
         self.catalog = catalog
         self.version = CAPABILITY_REGISTRY_VERSION
+        self._validate_public_metadata()
         ads_platform = r"(?:google\s*ads?|meta\s*ads?|facebook\s*ads?|fb\s*廣告)"
         ads_native_metric = (
             r"(?:廣告|成效|花費|費用|成本|spend|cost|performance|cpc|cpm|roas|"
@@ -426,6 +467,64 @@ class CapabilityRegistry:
     def tool_description(self, tool_name: str) -> str:
         return PUBLIC_TOOL_DESCRIPTIONS[tool_name]
 
+    @staticmethod
+    def _validate_public_metadata() -> None:
+        public_tools = set(PUBLIC_TOOL_DESCRIPTIONS)
+        declared_tools = [
+            tool
+            for capability in SUPPORTED_CAPABILITIES
+            for tool in capability["tools"]
+        ]
+        capability_tools = set(declared_tools)
+        if len(declared_tools) != len(capability_tools):
+            raise RuntimeError("Capability registry tools must be declared only once.")
+        if capability_tools != public_tools:
+            raise RuntimeError(
+                "Capability registry tools must match PUBLIC_TOOL_DESCRIPTIONS: "
+                f"missing={sorted(public_tools - capability_tools)}, "
+                f"undeclared={sorted(capability_tools - public_tools)}"
+            )
+
+        capability_ids = [capability["capability_id"] for capability in SUPPORTED_CAPABILITIES]
+        if len(capability_ids) != len(set(capability_ids)):
+            raise RuntimeError("Capability registry capability_id values must be unique.")
+
+    def consent_metadata(self) -> dict[str, Any]:
+        """Return the user-facing capability contract used by OAuth consent."""
+
+        inventory = self.inventory()
+        return {
+            "registry_version": inventory["registry_version"],
+            "catalog_version": inventory["catalog_version"],
+            "supported": inventory["supported"],
+            "unsupported": inventory["unsupported"],
+            "limitations": inventory["limitations"],
+            "public_tools": inventory["public_tools"],
+        }
+
+    def server_instructions(self) -> str:
+        """Add the versioned public capability summary to MCP instructions."""
+
+        inventory = self.inventory()
+        supported_lines = "\n".join(
+            f"- {capability['label']}: {capability['description']}"
+            for capability in inventory["supported"]
+        )
+        unsupported_lines = "\n".join(
+            f"- {intent['label']}"
+            for intent in inventory["unsupported"]
+        )
+        public_tools = ", ".join(inventory["public_tools"])
+        return (
+            f"Capability registry version {inventory['registry_version']}. Its public tools are: "
+            f"{public_tools}.\n\n"
+            "The public capability summary is:\n"
+            f"{supported_lines}\n\n"
+            "The explicit unsupported boundaries are:\n"
+            f"{unsupported_lines}\n\n"
+            f"{_SERVER_INSTRUCTIONS_BASE}"
+        )
+
     def inventory(self) -> dict[str, Any]:
         return {
             "status": "ok",
@@ -435,37 +534,21 @@ class CapabilityRegistry:
             "selection_token_required": False,
             "supported": [
                 {
-                    "capability_id": "capability_lookup",
-                    "data_source": "local_metadata",
-                    "tools": ["get_ga4_capabilities"],
-                },
-                {
-                    "capability_id": "customer_discovery",
-                    "data_source": "tenant_registry",
-                    "tools": ["customer_lookup", "list_available_customers"],
-                },
-                {
-                    "capability_id": "ga4_traffic_summary",
-                    "data_source": "ga4",
-                    "tools": ["traffic_summary"],
-                },
-                {
-                    "capability_id": "ga4_semantic_metrics",
-                    "data_source": "ga4",
-                    "tools": ["search_ga4_metrics", "query_ga4"],
-                },
+                    **capability,
+                    "tools": list(capability["tools"]),
+                }
+                for capability in SUPPORTED_CAPABILITIES
             ],
             "unsupported": [
-                {"intent_id": intent.intent_id, "label": intent.label}
+                {
+                    "intent_id": intent.intent_id,
+                    "label": intent.label,
+                    "message": intent.message,
+                }
                 for intent in self.unsupported_intents
             ],
             "public_tools": list(self.public_tool_names()),
-            "limitations": [
-                "GA4 semantic catalog 中已發布的唯讀 metrics",
-                "客戶、profile、project 與 dataset 只能由 tenant registry 解析",
-                "日期、單一 job、request 合計、timeout 與每日 BigQuery quota 限制",
-                "不接受任意 SQL 或資料修改",
-            ],
+            "limitations": list(CONSENT_LIMITATIONS),
         }
 
     def resolve(self, request: str | None = None) -> dict[str, Any]:
@@ -941,3 +1024,4 @@ class CapabilityRegistry:
 
 
 capability_registry = CapabilityRegistry(semantic_catalog)
+SERVER_INSTRUCTIONS = capability_registry.server_instructions()
