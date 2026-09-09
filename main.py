@@ -357,6 +357,11 @@ def _resolve_tenant_record(
     except Exception as error:
         mapped_error = query_policy.map_bigquery_error(error)
         if mapped_error is not None:
+            mapped_error.attach_tenant_context(
+                requested_name=requested_name,
+                resolved_name=None,
+                match_type="none",
+            )
             raise mapped_error from error
         raise
 

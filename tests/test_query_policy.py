@@ -275,11 +275,12 @@ class QueryPolicyTests(unittest.TestCase):
             main.app.dependency_overrides.clear()
 
         self.assertEqual(rest_response.status_code, 429)
-        self.assertEqual(
-            rest_response.json()["detail"]["status"],
-            "daily_query_quota_exceeded",
-        )
-        self.assertEqual(mcp_result["status"], "daily_query_quota_exceeded")
+        for result in (rest_response.json()["detail"], mcp_result):
+            self.assertEqual(result["status"], "daily_query_quota_exceeded")
+            self.assertEqual(result["requested_name"], "customer")
+            self.assertIsNone(result["resolved_name"])
+            self.assertEqual(result["match_type"], "none")
+        self.assertEqual(client.query.call_count, 2)
 
 
 if __name__ == "__main__":

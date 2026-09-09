@@ -45,10 +45,10 @@ class QueryPolicyError(ValueError):
         self,
         *,
         requested_name: str,
-        resolved_name: str,
+        resolved_name: str | None,
         match_type: str,
     ) -> None:
-        """Preserve tenant resolution context on post-resolution policy errors."""
+        """Preserve tenant lookup context on policy errors."""
 
         self.requested_name = requested_name
         self.resolved_name = resolved_name
