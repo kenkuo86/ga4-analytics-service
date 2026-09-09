@@ -376,6 +376,50 @@ class TenantResolutionTests(unittest.TestCase):
             "job-traffic-failed",
         )
 
+    def test_failed_traffic_row_iteration_is_marked_failed(self):
+        class FailingRows:
+            def __init__(self):
+                self.returned_first_row = False
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if not self.returned_first_row:
+                    self.returned_first_row = True
+                    return SimpleNamespace()
+                raise RuntimeError("next page failed")
+
+        registry_job = Mock()
+        registry_job.result.return_value = [_row(project_id="customer-project")]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        failed_job = Mock()
+        failed_job.job_id = "job-traffic-page-failed"
+        failed_job.cache_hit = True
+        failed_job.total_bytes_processed = 7_000_000
+        failed_job.total_bytes_billed = 6_000_000
+        failed_job.result.return_value = FailingRows()
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, failed_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(TrafficSummaryReportError) as raised,
+        ):
+            get_traffic_summary(
+                "維肯媒體部落格",
+                "2026-08-17",
+                "2026-08-23",
+                include_query=True,
+            )
+
+        query = raised.exception.as_result()["details"]["query_provenance"][
+            "queries"
+        ][0]
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(query["job_id"], "job-traffic-page-failed")
+        self.assertTrue(query["cache_hit"])
+
     def test_traffic_summary_validates_dates_before_bigquery(self):
         with (
             unittest.mock.patch("main.get_bigquery_client") as get_client,

@@ -674,7 +674,14 @@ def get_traffic_summary(
         report_error = TrafficSummaryReportError()
         _attach_provenance_if_requested(
             report_error,
-            [successful_record],
+            [
+                build_query_provenance(
+                    prepared_query,
+                    job=query_job,
+                    status="failed",
+                    estimated_bytes_processed=estimates.get("traffic_summary"),
+                )
+            ],
             include_query=include_query,
         )
         raise report_error from error
