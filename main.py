@@ -21,6 +21,7 @@ from query_policy import (
     query_policy,
 )
 from semantic_catalog import SemanticCatalogError, semantic_catalog
+from tenant_context import TenantContextErrorMixin, TenantRequestContext
 from tenant_registry import (
     ALIAS_SEPARATOR,
     is_broad_customer_search,
@@ -37,7 +38,7 @@ app = FastAPI()
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
 
 
-class TenantResolutionError(ValueError):
+class TenantResolutionError(TenantContextErrorMixin, ValueError):
     """A customer name could not be resolved to one active tenant."""
 
     def __init__(
@@ -56,9 +57,13 @@ class TenantResolutionError(ValueError):
         self.code = code
         self.customer_name = customer_name
         self.message = message
-        self.requested_name = requested_name if requested_name is not None else customer_name
-        self.resolved_name = resolved_name
-        self.match_type = match_type
+        self._init_tenant_context(
+            requested_name=(
+                requested_name if requested_name is not None else customer_name
+            ),
+            resolved_name=resolved_name,
+            match_type=match_type,
+        )
         self.candidates = candidates or []
         self.details = details or {}
 
@@ -66,11 +71,9 @@ class TenantResolutionError(ValueError):
         result: dict[str, Any] = {
             "status": self.code,
             "customer_name": self.customer_name,
-            "requested_name": self.requested_name,
-            "resolved_name": self.resolved_name,
-            "match_type": self.match_type,
             "message": self.message,
         }
+        result.update(self.tenant_context_result())
         if self.candidates:
             result["candidates"] = self.candidates
         if self.details:
@@ -357,10 +360,8 @@ def _resolve_tenant_record(
     except Exception as error:
         mapped_error = query_policy.map_bigquery_error(error)
         if mapped_error is not None:
-            mapped_error.attach_tenant_context(
-                requested_name=requested_name,
-                resolved_name=None,
-                match_type="none",
+            mapped_error.attach_request_context(
+                TenantRequestContext.from_customer_name(requested_name)
             )
             raise mapped_error from error
         raise
@@ -579,6 +580,37 @@ def query_ga4_semantic_metrics(
 ) -> dict[str, Any]:
     """Execute catalog-approved metric SQL for one resolved tenant."""
 
+    request_context = TenantRequestContext.from_customer_name(customer_name)
+    try:
+        return _query_ga4_semantic_metrics(
+            customer_name=customer_name,
+            metric_ids=metric_ids,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            include_query=include_query,
+            request_context=request_context,
+        )
+    except (
+        TenantResolutionError,
+        QueryPolicyError,
+        SemanticCatalogError,
+    ) as error:
+        error.attach_request_context(request_context)
+        raise
+
+
+def _query_ga4_semantic_metrics(
+    customer_name: str,
+    metric_ids: list[str],
+    start_date: str,
+    end_date: str,
+    limit: int,
+    include_query: bool,
+    request_context: TenantRequestContext,
+) -> dict[str, Any]:
+    """Execute catalog-approved metric SQL for one resolved tenant."""
+
     if not isinstance(metric_ids, list) or not metric_ids:
         raise SemanticCatalogError(
             "invalid_metric_request",
@@ -610,36 +642,21 @@ def query_ga4_semantic_metrics(
     result_limit = max(1, min(int(limit), 200))
     client = get_bigquery_client()
     tenant = get_tenant_config(client, customer_name)
-    try:
-        resolved_profile, _ = semantic_catalog.resolve_profile(
-            normalized_metric_ids,
-            tenant["semantic_profile"],
-        )
-    except SemanticCatalogError as error:
-        error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
-        raise
+    request_context.resolve_from_tenant(tenant)
+    resolved_profile, _ = semantic_catalog.resolve_profile(
+        normalized_metric_ids,
+        tenant["semantic_profile"],
+    )
     profile_resolution = "tenant_registry.ec"
     prepared_metrics: list[dict[str, Any]] = []
     for metric_id in normalized_metric_ids:
-        try:
-            sql, metric = semantic_catalog.compile_sql(
-                profile=resolved_profile,
-                metric_id=metric_id,
-                project_id=tenant["project_id"],
-                dataset_id=tenant["dataset_id"],
-                result_limit=result_limit,
-            )
-        except SemanticCatalogError as error:
-            error.attach_tenant_context(
-                requested_name=tenant["requested_name"],
-                resolved_name=tenant["resolved_name"],
-                match_type=tenant["match_type"],
-            )
-            raise
+        sql, metric = semantic_catalog.compile_sql(
+            profile=resolved_profile,
+            metric_id=metric_id,
+            project_id=tenant["project_id"],
+            dataset_id=tenant["dataset_id"],
+            result_limit=result_limit,
+        )
         date_scope = (
             "requested_period"
             if "@start_date" in sql and "@end_date" in sql
@@ -676,11 +693,6 @@ def query_ga4_semantic_metrics(
     try:
         estimates = query_policy.preflight_request(client, queries)
     except QueryPolicyError as error:
-        error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         records = [
             build_query_provenance(
                 item["query"],
@@ -752,22 +764,12 @@ def query_ga4_semantic_metrics(
                 records,
                 include_query=include_query,
             )
-            error.attach_tenant_context(
-                requested_name=tenant["requested_name"],
-                resolved_name=tenant["resolved_name"],
-                match_type=tenant["match_type"],
-            )
             raise
         except Exception as error:
             semantic_error = SemanticCatalogError(
                 "data_unavailable",
                 f"客戶「{tenant['tenant_name']}」的指標「{metric_id}」目前無法查詢。",
                 details={"metric_id": metric_id},
-            )
-            semantic_error.attach_tenant_context(
-                requested_name=tenant["requested_name"],
-                resolved_name=tenant["resolved_name"],
-                match_type=tenant["match_type"],
             )
             records = [
                 *executed_records,
@@ -838,6 +840,33 @@ def get_traffic_summary(
     end_date: str,
     include_query: bool = False,
 ):
+    """Build one traffic summary with consistent tenant error context."""
+
+    request_context = TenantRequestContext.from_customer_name(customer_name)
+    try:
+        return _get_traffic_summary(
+            customer_name=customer_name,
+            start_date=start_date,
+            end_date=end_date,
+            include_query=include_query,
+            request_context=request_context,
+        )
+    except (
+        TenantResolutionError,
+        QueryPolicyError,
+        TrafficSummaryReportError,
+    ) as error:
+        error.attach_request_context(request_context)
+        raise
+
+
+def _get_traffic_summary(
+    customer_name: str,
+    start_date: str,
+    end_date: str,
+    include_query: bool,
+    request_context: TenantRequestContext,
+):
     parsed_start, parsed_end = query_policy.validate_date_range(
         start_date,
         end_date,
@@ -849,6 +878,7 @@ def get_traffic_summary(
         client=client,
         customer_name=customer_name,
     )
+    request_context.resolve_from_tenant(tenant)
 
     sql_path = (
         Path(__file__).parent
@@ -887,11 +917,6 @@ def get_traffic_summary(
     try:
         estimates = query_policy.preflight_request(client, [prepared_query])
     except QueryPolicyError as error:
-        error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         _attach_provenance_if_requested(
             error,
             [
@@ -911,11 +936,6 @@ def get_traffic_summary(
     try:
         query_job, rows = query_policy.execute(client, prepared_query)
     except QueryPolicyError as error:
-        error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         _attach_provenance_if_requested(
             error,
             [
@@ -964,11 +984,6 @@ def get_traffic_summary(
         has_extra_row = next(row_iterator, None) is not None
     except StopIteration as error:
         report_error = TrafficSummaryReportError()
-        report_error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         _attach_provenance_if_requested(
             report_error,
             [successful_record],
@@ -977,11 +992,6 @@ def get_traffic_summary(
         raise report_error from error
     except Exception as error:
         report_error = TrafficSummaryReportError()
-        report_error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         _attach_provenance_if_requested(
             report_error,
             [
@@ -997,11 +1007,6 @@ def get_traffic_summary(
         raise report_error from error
     if has_extra_row:
         report_error = TrafficSummaryReportError()
-        report_error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         _attach_provenance_if_requested(
             report_error,
             [successful_record],
@@ -1015,11 +1020,6 @@ def get_traffic_summary(
             tenant=tenant,
         )
     except TrafficSummaryReportError as error:
-        error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
-        )
         _attach_provenance_if_requested(
             error,
             [successful_record],

@@ -5,6 +5,8 @@ from decimal import Decimal
 import math
 from typing import Any, Mapping, Sequence
 
+from tenant_context import TenantContextErrorMixin, TenantRequestContext
+
 
 REPORT_TYPE = "traffic_summary"
 REPORT_SCHEMA_VERSION = "1.0.0"
@@ -50,7 +52,7 @@ _SERIES = (
 )
 
 
-class TrafficSummaryReportError(RuntimeError):
+class TrafficSummaryReportError(TenantContextErrorMixin, RuntimeError):
     """The query result could not be represented by the public report contract."""
 
     def __init__(self, *, details: dict[str, Any] | None = None) -> None:
@@ -58,36 +60,14 @@ class TrafficSummaryReportError(RuntimeError):
         self.code = REPORT_CONTRACT_ERROR_CODE
         self.message = REPORT_CONTRACT_ERROR_MESSAGE
         self.details = details or {}
-        self.requested_name: str | None = None
-        self.resolved_name: str | None = None
-        self.match_type: str | None = None
-
-    def attach_tenant_context(
-        self,
-        *,
-        requested_name: str,
-        resolved_name: str,
-        match_type: str,
-    ) -> None:
-        """Preserve tenant resolution context on report-contract errors."""
-
-        self.requested_name = requested_name
-        self.resolved_name = resolved_name
-        self.match_type = match_type
+        self._init_tenant_context()
 
     def as_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": self.code,
             "message": self.message,
         }
-        if self.requested_name is not None:
-            result.update(
-                {
-                    "requested_name": self.requested_name,
-                    "resolved_name": self.resolved_name,
-                    "match_type": self.match_type,
-                }
-            )
+        result.update(self.tenant_context_result())
         if self.details:
             result["details"] = self.details
         return result
@@ -99,10 +79,12 @@ def _attach_tenant_context(
 ) -> None:
     context_fields = ("requested_name", "resolved_name", "match_type")
     if all(field_name in tenant for field_name in context_fields):
-        error.attach_tenant_context(
-            requested_name=tenant["requested_name"],
-            resolved_name=tenant["resolved_name"],
-            match_type=tenant["match_type"],
+        error.attach_request_context(
+            TenantRequestContext(
+                requested_name=tenant["requested_name"],
+                resolved_name=tenant["resolved_name"],
+                match_type=tenant["match_type"],
+            )
         )
 
 

@@ -6,6 +6,8 @@ import re
 import unicodedata
 from typing import Any
 
+from tenant_context import TenantContextErrorMixin
+
 
 CATALOG_PATH = Path(__file__).parent / "semantic" / "catalog.v1.json"
 SUPPORTED_PROFILES = ("non_ecommerce", "ecommerce")
@@ -27,7 +29,7 @@ FORBIDDEN_SQL_PATTERN = re.compile(
 )
 
 
-class SemanticCatalogError(ValueError):
+class SemanticCatalogError(TenantContextErrorMixin, ValueError):
     def __init__(
         self,
         code: str,
@@ -39,36 +41,14 @@ class SemanticCatalogError(ValueError):
         self.code = code
         self.message = message
         self.details = details or {}
-        self.requested_name: str | None = None
-        self.resolved_name: str | None = None
-        self.match_type: str | None = None
-
-    def attach_tenant_context(
-        self,
-        *,
-        requested_name: str,
-        resolved_name: str,
-        match_type: str,
-    ) -> None:
-        """Preserve tenant resolution context on post-resolution errors."""
-
-        self.requested_name = requested_name
-        self.resolved_name = resolved_name
-        self.match_type = match_type
+        self._init_tenant_context()
 
     def as_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": self.code,
             "message": self.message,
         }
-        if self.requested_name is not None:
-            result.update(
-                {
-                    "requested_name": self.requested_name,
-                    "resolved_name": self.resolved_name,
-                    "match_type": self.match_type,
-                }
-            )
+        result.update(self.tenant_context_result())
         if self.details:
             result["details"] = self.details
         return result

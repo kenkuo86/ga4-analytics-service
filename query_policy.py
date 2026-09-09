@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from google.api_core import exceptions as google_exceptions
 from google.cloud import bigquery
 
+from tenant_context import TenantContextErrorMixin
+
 
 DEFAULT_MAX_DATE_RANGE_DAYS = 90
 DEFAULT_EARLIEST_DATE = date(2020, 10, 14)
@@ -23,7 +25,7 @@ QUERY_PROVENANCE_SCHEMA_VERSION = "1.0.0"
 _ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
-class QueryPolicyError(ValueError):
+class QueryPolicyError(TenantContextErrorMixin, ValueError):
     """A GA4 data query was rejected by the shared query policy."""
 
     def __init__(
@@ -37,36 +39,14 @@ class QueryPolicyError(ValueError):
         self.code = code
         self.message = message
         self.details = details or {}
-        self.requested_name: str | None = None
-        self.resolved_name: str | None = None
-        self.match_type: str | None = None
-
-    def attach_tenant_context(
-        self,
-        *,
-        requested_name: str,
-        resolved_name: str | None,
-        match_type: str,
-    ) -> None:
-        """Preserve tenant lookup context on policy errors."""
-
-        self.requested_name = requested_name
-        self.resolved_name = resolved_name
-        self.match_type = match_type
+        self._init_tenant_context()
 
     def as_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": self.code,
             "message": self.message,
         }
-        if self.requested_name is not None:
-            result.update(
-                {
-                    "requested_name": self.requested_name,
-                    "resolved_name": self.resolved_name,
-                    "match_type": self.match_type,
-                }
-            )
+        result.update(self.tenant_context_result())
         if self.details:
             result["details"] = self.details
         return result

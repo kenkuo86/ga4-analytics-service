@@ -711,6 +711,9 @@ class TenantResolutionTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "date_range_too_large")
+        self.assertEqual(raised.exception.requested_name, "維肯媒體部落格")
+        self.assertIsNone(raised.exception.resolved_name)
+        self.assertEqual(raised.exception.match_type, "none")
         get_client.assert_not_called()
 
     def test_traffic_summary_comparison_stays_after_earliest_date(self):
@@ -725,6 +728,9 @@ class TenantResolutionTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "date_before_available_range")
+        self.assertEqual(raised.exception.requested_name, "維肯媒體部落格")
+        self.assertIsNone(raised.exception.resolved_name)
+        self.assertEqual(raised.exception.match_type, "none")
         get_client.assert_not_called()
 
     def test_traffic_summary_cost_limit_blocks_data_execution(self):

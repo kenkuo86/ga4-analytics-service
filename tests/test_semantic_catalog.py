@@ -596,6 +596,16 @@ class SemanticCatalogTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "invalid_date_range")
+        self.assertEqual(
+            raised.exception.as_result(),
+            {
+                "status": "invalid_date_range",
+                "message": "start_date 不得晚於 end_date。",
+                "requested_name": "初衣食午股份有限公司",
+                "resolved_name": None,
+                "match_type": "none",
+            },
+        )
 
     def test_multi_metric_request_limit_blocks_all_data_queries(self):
         registry_job = Mock()
