@@ -882,6 +882,9 @@ def get_traffic_summary(
             "data_unavailable",
             customer_name,
             f"客戶「{tenant['tenant_name']}」存在於 tenant registry，但目前無法取得 GA4 流量資料。",
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
         )
         _attach_provenance_if_requested(
             mapped_error,

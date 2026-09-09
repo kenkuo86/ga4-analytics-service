@@ -573,6 +573,44 @@ class TenantResolutionTests(unittest.TestCase):
             "job-traffic-failed",
         )
 
+    def test_failed_traffic_query_preserves_alias_resolution_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+                project_id="customer-project",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        failed_job = Mock()
+        failed_job.job_id = "job-alias-traffic-failed"
+        failed_job.result.side_effect = RuntimeError("query failed")
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, failed_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(TenantResolutionError) as raised,
+        ):
+            get_traffic_summary(
+                "Orient Beauty",
+                "2026-08-17",
+                "2026-08-23",
+                include_query=True,
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "data_unavailable")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        self.assertEqual(
+            result["details"]["query_provenance"]["queries"][0]["job_id"],
+            "job-alias-traffic-failed",
+        )
+
     def test_failed_traffic_row_iteration_is_marked_failed(self):
         class FailingRows:
             def __init__(self):
