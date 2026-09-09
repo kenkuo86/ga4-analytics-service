@@ -218,12 +218,12 @@ def validate_registry_rows(rows: Iterable[Any]) -> dict[str, Any]:
                 )
 
     for normalized_name, tenant_ids in formal_names.items():
-        if len(set(tenant_ids)) > 1:
+        if len(tenant_ids) > 1:
             issues.append(
                 _issue(
                     code="duplicate_formal_name",
                     message=(
-                        f"正式名稱「{formal_display[normalized_name]}」正規化後對應多個 tenants。"
+                        f"正式名稱「{formal_display[normalized_name]}」正規化後出現在多筆 registry rows。"
                     ),
                     tenant_ids=sorted(set(tenant_ids)),
                 )
@@ -231,12 +231,12 @@ def validate_registry_rows(rows: Iterable[Any]) -> dict[str, Any]:
 
     for normalized_alias, tenant_ids in alias_names.items():
         unique_tenant_ids = sorted(set(tenant_ids))
-        if len(unique_tenant_ids) > 1:
+        if len(tenant_ids) > 1:
             issues.append(
                 _issue(
                     code="duplicate_alias_across_tenants",
                     message=(
-                        f"alias「{alias_display[normalized_alias]}」正規化後不得指向多個 tenants。"
+                        f"alias「{alias_display[normalized_alias]}」正規化後不得出現在多筆 registry rows。"
                     ),
                     tenant_ids=unique_tenant_ids,
                     alias=alias_display[normalized_alias],

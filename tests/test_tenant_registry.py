@@ -95,6 +95,14 @@ class TenantRegistryTests(unittest.TestCase):
             {issue["code"] for issue in raised.exception.issues},
         )
 
+    def test_duplicate_physical_rows_with_same_tenant_id_are_rejected(self):
+        with self.assertRaises(TenantRegistryValidationError) as raised:
+            validate_registry_rows([_row(), _row()])
+
+        issue_codes = {issue["code"] for issue in raised.exception.issues}
+        self.assertIn("duplicate_formal_name", issue_codes)
+        self.assertIn("duplicate_alias_across_tenants", issue_codes)
+
     def test_alias_formal_name_collision_is_rejected(self):
         with self.assertRaises(TenantRegistryValidationError) as raised:
             validate_registry_rows(
