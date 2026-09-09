@@ -364,7 +364,13 @@ class SemanticCatalogTests(unittest.TestCase):
 
     def test_failed_metric_query_keeps_structured_provenance(self):
         registry_job = Mock()
-        registry_job.result.return_value = [_tenant_row()]
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
         dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
         failed_job = Mock()
         failed_job.job_id = "job-failed"
@@ -380,7 +386,7 @@ class SemanticCatalogTests(unittest.TestCase):
             self.assertRaises(SemanticCatalogError) as raised,
         ):
             query_ga4_semantic_metrics(
-                customer_name="初衣食午股份有限公司",
+                customer_name="Orient Beauty",
                 metric_ids=["total_sessions"],
                 start_date="2026-08-17",
                 end_date="2026-08-23",
@@ -388,7 +394,11 @@ class SemanticCatalogTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "data_unavailable")
-        provenance = raised.exception.as_result()["details"]["query_provenance"]
+        result = raised.exception.as_result()
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        provenance = result["details"]["query_provenance"]
         self.assertEqual(provenance["queries"][0]["status"], "failed")
         self.assertEqual(provenance["queries"][0]["job_id"], "job-failed")
         self.assertEqual(provenance["queries"][0]["bytes_billed"], 5_000_000)
@@ -439,6 +449,50 @@ class SemanticCatalogTests(unittest.TestCase):
         self.assertTrue(query["cache_hit"])
         self.assertEqual(query["bytes_processed"], 7_000_000)
         self.assertEqual(query["bytes_billed"], 6_000_000)
+
+    def test_failed_alias_metric_row_serialization_preserves_context(self):
+        class BadRow:
+            def items(self):
+                raise RuntimeError("row serialization failed")
+
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+        metric_job = Mock()
+        metric_job.job_id = "job-serialization-failed"
+        metric_job.cache_hit = False
+        metric_job.total_bytes_processed = 5_000_000
+        metric_job.total_bytes_billed = 5_000_000
+        metric_job.result.return_value = [BadRow()]
+        client = Mock()
+        client.query.side_effect = [registry_job, dry_run_job, metric_job]
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+                include_query=True,
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "data_unavailable")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        query = result["details"]["query_provenance"]["queries"][0]
+        self.assertEqual(query["status"], "failed")
+        self.assertEqual(query["job_id"], "job-serialization-failed")
 
     def test_generic_query_uses_ecommerce_profile_from_registry(self):
         registry_job = Mock()

@@ -681,6 +681,24 @@ def query_ga4_semantic_metrics(
         try:
             query_job, rows = query_policy.execute(client, item["query"])
             rows = list(rows)
+            truncated = len(rows) > result_limit
+            serialized_rows = [
+                _serialize_bigquery_value(dict(row.items()))
+                for row in rows[:result_limit]
+            ]
+            metric_results.append(
+                {
+                    "metric_id": metric_id,
+                    "label": metric["label"],
+                    "main_metric": metric["main_metric"],
+                    "category": metric["category"],
+                    "dimensions": metric["dimensions"],
+                    "date_scope": item["date_scope"],
+                    "row_count": len(serialized_rows),
+                    "truncated": truncated,
+                    "rows": serialized_rows,
+                }
+            )
         except QueryPolicyError as error:
             records = [
                 *executed_records,
@@ -718,6 +736,11 @@ def query_ga4_semantic_metrics(
                 f"客戶「{tenant['tenant_name']}」的指標「{metric_id}」目前無法查詢。",
                 details={"metric_id": metric_id},
             )
+            semantic_error.attach_tenant_context(
+                requested_name=tenant["requested_name"],
+                resolved_name=tenant["resolved_name"],
+                match_type=tenant["match_type"],
+            )
             records = [
                 *executed_records,
                 build_query_provenance(
@@ -750,25 +773,6 @@ def query_ga4_semantic_metrics(
                 job=query_job,
                 estimated_bytes_processed=estimates.get(metric_id),
             )
-        )
-
-        truncated = len(rows) > result_limit
-        serialized_rows = [
-            _serialize_bigquery_value(dict(row.items()))
-            for row in rows[:result_limit]
-        ]
-        metric_results.append(
-            {
-                "metric_id": metric_id,
-                "label": metric["label"],
-                "main_metric": metric["main_metric"],
-                "category": metric["category"],
-                "dimensions": metric["dimensions"],
-                "date_scope": item["date_scope"],
-                "row_count": len(serialized_rows),
-                "truncated": truncated,
-                "rows": serialized_rows,
-            }
         )
 
     result = {
@@ -932,6 +936,11 @@ def get_traffic_summary(
         has_extra_row = next(row_iterator, None) is not None
     except StopIteration as error:
         report_error = TrafficSummaryReportError()
+        report_error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         _attach_provenance_if_requested(
             report_error,
             [successful_record],
@@ -940,6 +949,11 @@ def get_traffic_summary(
         raise report_error from error
     except Exception as error:
         report_error = TrafficSummaryReportError()
+        report_error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         _attach_provenance_if_requested(
             report_error,
             [
@@ -955,6 +969,11 @@ def get_traffic_summary(
         raise report_error from error
     if has_extra_row:
         report_error = TrafficSummaryReportError()
+        report_error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         _attach_provenance_if_requested(
             report_error,
             [successful_record],
@@ -968,6 +987,11 @@ def get_traffic_summary(
             tenant=tenant,
         )
     except TrafficSummaryReportError as error:
+        error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
         _attach_provenance_if_requested(
             error,
             [successful_record],

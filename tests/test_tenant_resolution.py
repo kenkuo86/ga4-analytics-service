@@ -793,6 +793,56 @@ class TenantResolutionTests(unittest.TestCase):
             "目前無法產生流量摘要報表，請稍後再試。",
         )
 
+    def test_traffic_summary_report_errors_preserve_alias_resolution_context(self):
+        class FailingRows:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise RuntimeError("next page failed")
+
+        cases = {
+            "empty": [],
+            "multiple": [SimpleNamespace(), SimpleNamespace()],
+            "iterator": FailingRows(),
+            "malformed": [SimpleNamespace()],
+        }
+        for failure_mode, rows in cases.items():
+            with self.subTest(failure_mode=failure_mode):
+                registry_job = Mock()
+                registry_job.result.return_value = [
+                    _row(
+                        tenant_name="東方美企業",
+                        aliases="Orient Beauty",
+                        match_type="alias",
+                        project_id="customer-project",
+                    )
+                ]
+                dry_run_job = SimpleNamespace(total_bytes_processed=1_000_000)
+                summary_job = Mock()
+                summary_job.result.return_value = rows
+                client = Mock()
+                client.query.side_effect = [registry_job, dry_run_job, summary_job]
+
+                with (
+                    unittest.mock.patch(
+                        "main.get_bigquery_client",
+                        return_value=client,
+                    ),
+                    self.assertRaises(TrafficSummaryReportError) as raised,
+                ):
+                    get_traffic_summary(
+                        "Orient Beauty",
+                        "2026-08-17",
+                        "2026-08-23",
+                    )
+
+                result = raised.exception.as_result()
+                self.assertEqual(result["status"], "invalid_report_contract")
+                self.assertEqual(result["requested_name"], "Orient Beauty")
+                self.assertEqual(result["resolved_name"], "東方美企業")
+                self.assertEqual(result["match_type"], "alias")
+
 
 if __name__ == "__main__":
     unittest.main()
