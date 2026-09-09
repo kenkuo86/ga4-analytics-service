@@ -598,20 +598,36 @@ def query_ga4_semantic_metrics(
     result_limit = max(1, min(int(limit), 200))
     client = get_bigquery_client()
     tenant = get_tenant_config(client, customer_name)
-    resolved_profile, _ = semantic_catalog.resolve_profile(
-        normalized_metric_ids,
-        tenant["semantic_profile"],
-    )
+    try:
+        resolved_profile, _ = semantic_catalog.resolve_profile(
+            normalized_metric_ids,
+            tenant["semantic_profile"],
+        )
+    except SemanticCatalogError as error:
+        error.attach_tenant_context(
+            requested_name=tenant["requested_name"],
+            resolved_name=tenant["resolved_name"],
+            match_type=tenant["match_type"],
+        )
+        raise
     profile_resolution = "tenant_registry.ec"
     prepared_metrics: list[dict[str, Any]] = []
     for metric_id in normalized_metric_ids:
-        sql, metric = semantic_catalog.compile_sql(
-            profile=resolved_profile,
-            metric_id=metric_id,
-            project_id=tenant["project_id"],
-            dataset_id=tenant["dataset_id"],
-            result_limit=result_limit,
-        )
+        try:
+            sql, metric = semantic_catalog.compile_sql(
+                profile=resolved_profile,
+                metric_id=metric_id,
+                project_id=tenant["project_id"],
+                dataset_id=tenant["dataset_id"],
+                result_limit=result_limit,
+            )
+        except SemanticCatalogError as error:
+            error.attach_tenant_context(
+                requested_name=tenant["requested_name"],
+                resolved_name=tenant["resolved_name"],
+                match_type=tenant["match_type"],
+            )
+            raise
         date_scope = (
             "requested_period"
             if "@start_date" in sql and "@end_date" in sql

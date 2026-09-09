@@ -228,6 +228,75 @@ class SemanticCatalogTests(unittest.TestCase):
             },
         )
 
+    def test_profile_resolution_error_preserves_alias_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["aov"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "unsupported_metric")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        self.assertEqual(client.query.call_count, 1)
+
+    def test_query_compilation_error_preserves_alias_context(self):
+        registry_job = Mock()
+        registry_job.result.return_value = [
+            _tenant_row(
+                tenant_name="東方美企業",
+                aliases="Orient Beauty",
+                match_type="alias",
+            )
+        ]
+        client = Mock()
+        client.query.return_value = registry_job
+        compile_error = SemanticCatalogError(
+            "catalog_compile_failed",
+            "catalog query compilation failed",
+        )
+
+        with (
+            unittest.mock.patch("main.get_bigquery_client", return_value=client),
+            unittest.mock.patch.object(
+                semantic_catalog,
+                "compile_sql",
+                side_effect=compile_error,
+            ),
+            self.assertRaises(SemanticCatalogError) as raised,
+        ):
+            query_ga4_semantic_metrics(
+                customer_name="Orient Beauty",
+                metric_ids=["total_sessions"],
+                start_date="2026-08-17",
+                end_date="2026-08-23",
+            )
+
+        result = raised.exception.as_result()
+        self.assertEqual(result["status"], "catalog_compile_failed")
+        self.assertEqual(result["requested_name"], "Orient Beauty")
+        self.assertEqual(result["resolved_name"], "東方美企業")
+        self.assertEqual(result["match_type"], "alias")
+        self.assertEqual(client.query.call_count, 1)
+
     def test_generic_query_policy_preflight_preserves_alias_resolution_context(self):
         registry_job = Mock()
         registry_job.result.return_value = [
