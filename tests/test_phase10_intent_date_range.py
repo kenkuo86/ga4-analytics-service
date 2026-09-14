@@ -220,7 +220,12 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                 self.assertEqual(result.reason_code, "fractional_period_quantity")
 
     def test_date_component_width_over_two_digits_is_invalid(self):
-        for malformed_date in ("2026/009/01", "2026-009-01"):
+        for malformed_date in (
+            "2026/009/01",
+            "2026-009-01",
+            "2026--09-01",
+            "2026-xx-01",
+        ):
             with self.subTest(malformed_date=malformed_date):
                 result = resolve_period_intent(
                     f"GA4 sessions {malformed_date}",
@@ -230,6 +235,19 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
 
                 self.assertEqual(result.outcome, "invalid_period")
                 self.assertEqual(result.reason_code, "invalid_date_format")
+
+    def test_english_relative_phrases_require_a_leading_boundary(self):
+        for phrase in ("compast 7 days", "xrecent 7 days"):
+            with self.subTest(phrase=phrase):
+                result = resolve_period_intent(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(result.reason_code, "ambiguous_period")
+                self.assertEqual(result.requested_days, 0)
 
 
 class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
@@ -429,7 +447,12 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                 )
 
     def test_date_component_width_over_two_digits_is_not_silently_accepted(self):
-        for malformed_date in ("2026/009/01", "2026-009-01"):
+        for malformed_date in (
+            "2026/009/01",
+            "2026-009-01",
+            "2026--09-01",
+            "2026-xx-01",
+        ):
             with self.subTest(malformed_date=malformed_date):
                 result = capability_registry.resolve(
                     f"GA4 sessions {malformed_date}",
@@ -440,6 +463,19 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                 self.assertEqual(result["resolution"], "needs_clarification")
                 self.assertEqual(result["reason_code"], "invalid_period")
                 self.assertEqual(result["period"]["reason_code"], "invalid_date_format")
+
+    def test_embedded_english_relative_phrase_is_not_accepted(self):
+        for phrase in ("compast 7 days", "xrecent 7 days"):
+            with self.subTest(phrase=phrase):
+                result = capability_registry.resolve(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "ambiguous_period")
+                self.assertEqual(result["period"]["requested_days"], 0)
 
     def test_traffic_comparison_modifier_does_not_add_explicit_days(self):
         result = capability_registry.resolve(

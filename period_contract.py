@@ -810,7 +810,7 @@ _RELATIVE_RULES = (
         "rolling_days",
         re.compile(
             rf"(?<![a-z0-9])(?:{_alternatives(_ROLLING_ZH_PREFIXES)})\s*(?P<zh_quantity>{_QUANTITY})\s*{_alternatives(_DAY_ZH_UNITS)}"
-            rf"|(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_DAY_EN_UNITS)}(?![a-z0-9])"
+            rf"|(?<![a-z0-9])(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_DAY_EN_UNITS)}(?![a-z0-9])"
         ),
     ),
     _RelativeRule(
@@ -830,7 +830,7 @@ _RELATIVE_RULES = (
         "rolling_weeks",
         re.compile(
             rf"(?<![a-z0-9])(?:{_alternatives(_ROLLING_ZH_PREFIXES)})\s*(?P<zh_quantity>{_QUANTITY})\s*{_alternatives(_WEEK_ZH_UNITS)}"
-            rf"|(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_WEEK_EN_UNITS)}(?![a-z0-9])"
+            rf"|(?<![a-z0-9])(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_WEEK_EN_UNITS)}(?![a-z0-9])"
         ),
     ),
     _RelativeRule(
@@ -850,7 +850,7 @@ _RELATIVE_RULES = (
         "rolling_months",
         re.compile(
             rf"(?<![a-z0-9])(?:{_alternatives(_ROLLING_ZH_PREFIXES)})\s*(?P<zh_quantity>{_QUANTITY})\s*{_alternatives(_MONTH_ZH_UNITS)}"
-            rf"|(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_MONTH_EN_UNITS)}(?![a-z0-9])"
+            rf"|(?<![a-z0-9])(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_MONTH_EN_UNITS)}(?![a-z0-9])"
         ),
     ),
     _RelativeRule(
@@ -870,7 +870,7 @@ _RELATIVE_RULES = (
         "rolling_years",
         re.compile(
             rf"(?<![a-z0-9])(?:{_alternatives(_ROLLING_ZH_PREFIXES)})\s*(?P<zh_quantity>{_QUANTITY})\s*{_alternatives(_YEAR_ZH_UNITS)}"
-            rf"|(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_YEAR_EN_UNITS)}(?![a-z0-9])"
+            rf"|(?<![a-z0-9])(?:{_alternatives(_ROLLING_EN_PREFIXES)})\s+(?P<en_quantity>{_QUANTITY})\s+{_alternatives(_YEAR_EN_UNITS)}(?![a-z0-9])"
         ),
     ),
     _RelativeRule(
@@ -914,11 +914,13 @@ _DATE_SINGLE_PATTERN = re.compile(
     rf"(?<!{_DATE_TOKEN_BOUNDARY}){_ISO_DATE_LIKE}(?!{_DATE_TOKEN_BOUNDARY})"
 )
 # Keep a second, deliberately permissive candidate pattern so a date with
-# attached digits/ASCII letters or invalid component widths (for example
-# 2026-09-01abc or 2026/009/01) are rejected as invalid tokens instead of
-# being silently shortened to a valid-looking date.
+# attached digits/ASCII letters, invalid component widths, or missing/non-numeric
+# components (for example 2026-09-01abc, 2026/009/01, or 2026--09-01) are
+# rejected as invalid tokens instead of being silently shortened to a
+# valid-looking date.  The component character class deliberately excludes
+# punctuation so normal sentence punctuation after a valid date remains safe.
 _DATE_LIKE_CANDIDATE_PATTERN = re.compile(
-    rf"[A-Za-z0-9]*\d{{4}}[-/]\d+[-/]\d+[A-Za-z0-9]*"
+    rf"[A-Za-z0-9_]*\d{{4}}[-/][A-Za-z0-9_]*[-/][A-Za-z0-9_]*"
 )
 _FRACTIONAL_QUANTITY = r"[-−－]?\s*\d+[.．]\d+"
 _FRACTIONAL_PERIOD_PATTERN = re.compile(
