@@ -8,6 +8,7 @@ from typing import Any
 from period_contract import (
     analysis_ignored_chinese_phrases,
     analysis_ignored_english_tokens,
+    explicit_date_range_separator_spans,
     is_query_context_clause,
     period_contract_inventory,
     period_instruction,
@@ -807,7 +808,7 @@ class CapabilityRegistry:
             return None
         clauses = [
             clause.strip()
-            for clause in self._clause_separator_pattern.split(request)
+            for clause in self._split_mixed_clauses(request)
             if clause.strip()
         ]
         if len(clauses) < 2:
@@ -824,6 +825,28 @@ class CapabilityRegistry:
             ):
                 return clause
         return None
+
+    def _split_mixed_clauses(self, request: str) -> list[str]:
+        """Split mixed requests without breaking recognized date ranges."""
+
+        masked_request = request
+        replacements: list[tuple[str, str]] = []
+        for index, (start, end) in enumerate(
+            reversed(explicit_date_range_separator_spans(request))
+        ):
+            marker = f"\ue000{index}\ue001"
+            original_separator = request[start:end]
+            masked_request = masked_request[:start] + marker + masked_request[end:]
+            replacements.append((marker, original_separator))
+
+        clauses = self._clause_separator_pattern.split(masked_request)
+        restored_clauses: list[str] = []
+        for clause in clauses:
+            restored = clause
+            for marker, original_separator in replacements:
+                restored = restored.replace(marker, original_separator)
+            restored_clauses.append(restored)
+        return restored_clauses
 
     def _has_complete_catalog_match(
         self,

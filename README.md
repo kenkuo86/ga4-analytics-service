@@ -117,6 +117,9 @@ instructions 與 Phase 10 eval fixture 的 versioned 單一來源，目前 contr
 days，因此重疊、相鄰、拆分的區段以及 `group by month` 都不能繞過限制。相對期間以
 `GA4_QUERY_TIME_ZONE` 的 today 為 anchor，無法唯一判斷的數量或 window kind 會要求釐清，
 無效日期與斜線日期會回傳 `invalid_period`，不會被靜默移除或正規化。
+明確日期必須是完整的 `YYYY-MM-DD` token；`from … to …` 與其他 contract-listed
+range separator 會被視為同一個日期區間，超出日期可處理範圍的數量也會回傳結構化
+`invalid_period`，不會造成 capability preflight 的未處理例外。
 
 Intent-level 上限直接讀取 active `QueryPolicy.max_date_range_days`，不在 instructions、
 metadata 或 eval implementation 寫死預設值。剛好等於上限可以繼續，上限加一天會在

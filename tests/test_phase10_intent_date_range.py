@@ -168,6 +168,26 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
         self.assertEqual(result.outcome, "invalid_period")
         self.assertEqual(result.reason_code, "date_before_available_range")
 
+    def test_iso_dates_require_complete_tokens(self):
+        for malformed_date in (
+            "12026-09-01",
+            "2026-09-011",
+            "2026-09-01abc",
+        ):
+            with self.subTest(malformed_date=malformed_date):
+                result = resolve_period_intent(
+                    f"GA4 sessions {malformed_date}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "invalid_period")
+                self.assertEqual(result.reason_code, "invalid_date_format")
+                self.assertEqual(
+                    result.phrase_matches[0].reason_code,
+                    "invalid_date_format",
+                )
+
 
 class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
     def test_versioned_behavior_matrix_keeps_data_calls_at_zero(self):
@@ -223,6 +243,17 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
         self.assertEqual(allowed["period"]["requested_days"], 90)
         self.assertEqual(rejected["reason_code"], "date_range_too_large")
         self.assertEqual(rejected["period"]["requested_days"], 91)
+
+    def test_from_to_date_range_is_not_split_as_a_mixed_request(self):
+        result = capability_registry.resolve(
+            "GA4 sessions from 2026-08-01 to 2026-08-31",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+
+        self.assertEqual(result["resolution"], "supported")
+        self.assertEqual(result["reason_code"], "ga4_semantic_metric")
+        self.assertEqual(result["period"]["requested_days"], 31)
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
         policy = _policy(max_days=31, time_zone="UTC")
@@ -296,6 +327,27 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
             result["period"]["phrase_matches"][0]["reason_code"],
             "invalid_date_format",
         )
+
+    def test_out_of_range_relative_quantity_returns_structured_period_error(self):
+        for period_phrase in (
+            "past 1000000000 days",
+            "past 1000000000 months",
+            "past 1000000000 years",
+        ):
+            with self.subTest(period_phrase=period_phrase):
+                result = capability_registry.resolve(
+                    f"GA4 sessions, {period_phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "invalid_period")
+                self.assertEqual(result["period"]["outcome"], "invalid_period")
+                self.assertEqual(
+                    result["period"]["phrase_matches"][0]["reason_code"],
+                    "period_quantity_out_of_range",
+                )
 
     def test_traffic_comparison_modifier_does_not_add_explicit_days(self):
         result = capability_registry.resolve(

@@ -712,7 +712,12 @@ def parse_quantity(value: str | None) -> int | None:
         return None
     normalized = _normalize(value)
     if normalized.isdigit():
-        return int(normalized)
+        try:
+            return int(normalized)
+        except ValueError:
+            # Python can reject an excessively long digit string before the
+            # period resolver gets a chance to return a structured fallback.
+            return None
     if normalized in _ENGLISH_NUMBER_VALUES:
         return _ENGLISH_NUMBER_VALUES[normalized]
     return _parse_chinese_number(normalized)
@@ -877,11 +882,20 @@ _RELATIVE_RULES = (
 
 
 _ISO_DATE_LIKE = r"\d{4}[-/]\d{1,2}[-/]\d{1,2}"
+_DATE_TOKEN_BOUNDARY = r"[A-Za-z0-9]"
 _ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _DATE_RANGE_PATTERN = re.compile(
-    rf"(?P<start>{_ISO_DATE_LIKE})\s*{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)}\s*(?P<end>{_ISO_DATE_LIKE})"
+    rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<start>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
+    rf"\s*(?P<separator>{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})\s*"
+    rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<end>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
 )
-_DATE_SINGLE_PATTERN = re.compile(_ISO_DATE_LIKE)
+_DATE_SINGLE_PATTERN = re.compile(
+    rf"(?<!{_DATE_TOKEN_BOUNDARY}){_ISO_DATE_LIKE}(?!{_DATE_TOKEN_BOUNDARY})"
+)
+# Keep a second, deliberately permissive candidate pattern so a date with
+# attached digits/ASCII letters (for example 2026-09-01abc) is rejected as an
+# invalid token instead of being silently shortened to 2026-09-01.
+_DATE_LIKE_CANDIDATE_PATTERN = re.compile(rf"[A-Za-z0-9]*{_ISO_DATE_LIKE}[A-Za-z0-9]*")
 
 _COMPARISON_PATTERN = re.compile(
     rf"(?<![a-z0-9]){_alternatives(COMPARISON_MODIFIER_PHRASES)}(?![a-z0-9])"
@@ -1143,7 +1157,41 @@ def _explicit_date_matches(
                 end_date=parsed,
             )
         )
+
+    for match in _DATE_LIKE_CANDIDATE_PATTERN.finditer(text):
+        span = match.span()
+        if _match_is_covered(span, occupied):
+            continue
+        occupied.append(span)
+        matches.append(
+            PeriodPhraseMatch(
+                phrase=match.group(0),
+                outcome="invalid_period",
+                span=span,
+                window_kind="explicit_date",
+                reason_code="invalid_date_format",
+                message=(
+                    "明確日期 token 必須完整使用 YYYY-MM-DD 格式，"
+                    "不得附帶額外數字或英數字元。"
+                ),
+            )
+        )
     return intervals, matches, occupied
+
+
+def explicit_date_range_separator_spans(
+    text: str,
+) -> tuple[tuple[int, int], ...]:
+    """Return separator spans inside contract-recognized date ranges.
+
+    ``text`` must be the same normalized string whose clauses will be split;
+    callers use the coordinates to protect ``to``/equivalent separators from
+    generic mixed-request splitting.
+    """
+
+    return tuple(
+        match.span("separator") for match in _DATE_RANGE_PATTERN.finditer(text)
+    )
 
 
 def _union_days(intervals: tuple[PeriodInterval, ...] | list[PeriodInterval]) -> int:
@@ -1180,7 +1228,25 @@ def _new_match_from_interval(
             reason_code="invalid_period_quantity",
             message="期間數量必須是正整數，不能使用零或負數。",
         )
-    start, end = _relative_dates(window_kind, quantity, anchor)
+    try:
+        start, end = _relative_dates(window_kind, quantity, anchor)
+    except (OverflowError, ValueError):
+        max_days = _policy_value(
+            policy,
+            "max_date_range_days",
+            DEFAULT_MAX_DATE_RANGE_DAYS,
+        )
+        return None, PeriodPhraseMatch(
+            phrase=phrase,
+            outcome="invalid_period",
+            span=span,
+            window_kind=window_kind,
+            reason_code="period_quantity_out_of_range",
+            message=(
+                f"期間數量超出可處理日期範圍，請提供不超過 {max_days} "
+                "個 calendar days 的期間。"
+            ),
+        )
     error = _date_error(start, end, policy=policy, today=anchor)
     if error is not None:
         reason_code, message = error
@@ -1660,6 +1726,7 @@ __all__ = [
     "PeriodPhraseMatch",
     "analysis_ignored_chinese_phrases",
     "analysis_ignored_english_tokens",
+    "explicit_date_range_separator_spans",
     "is_query_context_clause",
     "period_contract",
     "period_contract_inventory",
