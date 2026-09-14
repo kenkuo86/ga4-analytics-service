@@ -315,9 +315,10 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
 2. 定義 intent-level 的標準化結果，不使用含義不明的單一 `requested_period`：
    - `explicit_periods` 是使用者明確要求，或可由 `period_phrase_contract` deterministic 解析出的所有日期區間；每個區間皆包含起訖日。
    - `requested_days` 是所有 `explicit_periods` 聯集中的不重複 calendar days 數；拆分、相鄰區段或重疊區段都以聯集計算，因此不能用多個較小區段規避限制。grouping grain（例如按月 group）不改變 `requested_days`。
-   - `implicit_periods` 是 tool contract 自動加入、但使用者沒有另外要求的區間，例如 `traffic_summary` 的等長 previous comparison period；它不計入 intent-level `requested_days`。
-   - `effective_scan_periods` 記錄實際會讀取的 explicit 與 implicit periods，`effective_scan_days` 是其日期聯集天數，供 Phase 4 的 earliest-date、bytes、timeout 及 daily quota policy 使用；不得把 intent-level 天數限制誤述為實際掃描天數限制。
-   - `date_scope=all_available_data` 的 semantic metric 沒有可由 request 縮小的有效掃描期間；其 explicit period 仍用於 intent boundary，但 `effective_scan_periods=all_available_data`、`effective_scan_days=null`，結果必須保留既有 `date_scope` 說明，實際成本仍由 Phase 4 bytes policy 保護。
+   - `implicit_periods` 是 tool contract 自動加入、但使用者沒有另外指定起訖日期的區間，例如 `traffic_summary` 的等長 previous comparison period；它不計入 intent-level `requested_days`。
+   - `traffic_summary` 的 previous period 是固定 report contract；使用者只說「與前期比較」或 `compare with the previous period` 時，它仍是 implicit presentation／report modifier，不會升格為 `explicit_periods`。只有使用者另外提供第二個可解析日期區間時，兩段才都屬於 explicit，並以日期聯集計算 `requested_days`。
+   - Phase 10 不新增 request-level `effective_scan_periods` 或 `effective_scan_days` schema。實際掃描行為繼續以每個 metric／query 的 `date_scope`、query parameters 與 provenance 表示，並由 Phase 4 的 earliest-date、bytes、timeout 及 daily quota policy 保護。
+   - 同一 `query_ga4` request 混合 `requested_period` 與 `all_available_data` metrics 時，intent boundary 仍只計共同的 `explicit_periods`；每個 metric 保留自己的 `date_scope`，不得合併成一個會遺失 bounded metric 資訊的 request-level scan value。`all_available_data` metric 的成本仍由 Phase 4 bytes policy 保護。
 3. intent-level boundary 必須使用 data tools 同一個 active `QueryPolicy.max_date_range_days`，不得在 instructions、metadata 或 eval implementation 寫死目前預設的 90。當 `requested_days` 超過 active limit 時，在 tenant registry 或 BigQuery 前拒絕；回覆 deterministic 計算出的 `requested_days`、active limit，並要求使用者重新選擇期間。
 4. `period_phrase_contract` 使用 active policy timezone（預設 `Asia/Taipei`）的 today 作為 anchor，並至少完整定義下列 phrase families；表中的中英文同義詞都必須有 fixture：
 
@@ -336,6 +337,7 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
    | Completed years | 前 N 年、去年 | `previous N years`、無明確 N 的 `last year` | 完整 calendar years，不包含今年。 |
    | Year to date | 今年 | `this year` | 當年 `01-01` 至 today。 |
    | Explicit date／range | 單一 `YYYY-MM-DD` 或 `YYYY-MM-DD` 起訖日期 | One `YYYY-MM-DD` date or `YYYY-MM-DD` start／end dates | 單一日期解析為 `start_date=end_date=該日期`、`requested_days=1`；起訖範圍包含兩端。格式、順序、未來日期及 earliest date 沿用 Phase 4 policy。斜線日期等已被舊 qualifier regex 辨識但不符合 ISO contract 的形式回傳 `invalid_period`，不得靜默正規化。 |
+   | Fixed previous comparison modifier | 與前期／上一期比較 | `compare with the previous period` | 對 `traffic_summary` 只要求呈現 fixed report contract 已包含的 previous period，不新增 explicit period；若另有明示日期區間，則依 explicit range 規則計入。 |
 
    其他無法唯一判斷 window kind、anchor 或數量的表述一律回傳 `needs_clarification`，不得自行選擇語意或查詢客戶資料。
 5. 更新 server instructions、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與 `traffic_summary` 的公開說明：active limit 適用於完整使用者需求；超限時不得拆分、分頁、改用其他 data tool 或自動重試。README 與 consent limitation 必須區分 intent-level best-effort behavior、單次 tool call server enforcement 與 effective scan cost controls。
@@ -346,7 +348,8 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
    - 固定 `today=2026-09-16`：「前兩週」為 `2026-08-31` 至 `2026-09-13`、共 14 天。固定 `today=2024-02-29`：「過去一年」為 `2023-03-01` 至 `2024-02-29`、共 366 天；「去年」為 `2023-01-01` 至 `2023-12-31`、共 365 天。
    - 單獨的 `2026-09-01` 解析為 `start_date=end_date=2026-09-01`、`requested_days=1`；相同日期使用斜線格式 `2026/09/01` 時回傳 `invalid_period`。
    - 一般邊界以 `max_date_range_days` 參數化：剛好 `max_date_range_days` 天可繼續，`max_date_range_days+1` 天拒絕；另驗證 `GA4_QUERY_MAX_DAYS=31` 時 31 天可繼續、32 天拒絕，metadata、instructions 與錯誤訊息均顯示 31。
-   - `traffic_summary` 在預設 limit 90、current period 為 `2026-06-17` 至 `2026-09-14` 時，`requested_days=90`，自動 previous period 為 `2026-03-19` 至 `2026-06-16`，`effective_scan_days=180`；intent boundary 應允許，兩段仍須通過 Phase 4 policy。若使用者明確要求這兩段，則 `requested_days=180` 並拒絕。
+   - `traffic_summary` 在預設 limit 90、current period 為 `2026-06-17` 至 `2026-09-14` 時，`requested_days=90`，自動 previous period 為 `2026-03-19` 至 `2026-06-16`；無論使用者是否加上「與前期比較」，intent boundary 均應允許，previous period 仍須通過 Phase 4 policy。若使用者另行明示這兩個日期區間，則兩段都是 explicit、`requested_days=180` 並拒絕。
+   - 同一 `query_ga4` request 混合一個 `requested_period` metric 與一個 `all_available_data` metric 時，兩者各自保留原有 `date_scope`，不產生 request-level aggregate scan period；intent boundary decision 只依共同的 `requested_days`。
    - 「把過去半年拆成三段查」及先收到 `date_range_too_large` 後縮短、拆分或改用另一 data tool 的情境，預期 tenant registry 與 tenant data query 呼叫數皆為零。
 7. 將相同 matrix 的代表案例納入實際 Claude Custom Connector 部署後對話驗收，記錄 normalized period result、tool calls、是否接觸 tenant registry／tenant data，以及最終回答措辭。
 
@@ -364,9 +367,9 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
 - 收到結構化 `date_range_too_large` 後，host 不會自動縮短、拆分或改用另一個 data tool 重試。
 - `period_phrase_contract`、period parser、已辨識 qualifier、公開 metadata、instructions 與 eval inventory 一致；不存在已辨識但沒有 normative semantics 或明確 fallback outcome 的 phrase。
 - 預設及至少一個非預設 `GA4_QUERY_MAX_DAYS` 的邊界行為，與公開 capability metadata、instructions 及錯誤訊息一致。
-- 單一／多個 explicit periods、重疊與相鄰期間、implicit comparison periods 及 `date_scope=all_available_data` 均依標準化 period model 得到一致的 `requested_days` 與 boundary decision。
+- 單一／多個 explicit periods、重疊與相鄰期間、implicit comparison modifiers 及混合 `date_scope` 均依標準化 period model 得到一致的 `requested_days` 與 boundary decision，且不新增會遺失 per-metric 資訊的 aggregate scan schema。
 - 相對天數、rolling／completed weeks、rolling／completed calendar months、rolling／completed years、to-date、明確日期、語意不明、跨年、閏年及月底 clamp 均有使用固定 today 的明確 fixture 或部署後驗收紀錄。
-- `traffic_summary` 的 intent boundary 只計 current explicit period；自動 previous period 記錄於 `implicit_periods`／`effective_scan_periods`，並繼續受 Phase 4 的 earliest-date 與成本 policy 約束。
+- `traffic_summary` 的 intent boundary 只計明示 current period；fixed previous comparison 即使由使用者以關係詞提及仍屬 `implicit_periods`，並繼續受 Phase 4 的 earliest-date 與成本 policy 約束。只有另行明示第二段日期時才計入 `explicit_periods`。
 - 文件及 consent page 清楚揭露：單次 tool call 限制由服務端強制，完整使用者需求限制在 PoC 階段依賴 connector instructions 與 host behavior。
 - Phase 4 既有 semantic、traffic summary、REST 與 MCP 日期／成本測試持續通過。
 
