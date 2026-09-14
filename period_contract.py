@@ -22,7 +22,7 @@ from query_policy import (
 )
 
 
-PERIOD_PHRASE_CONTRACT_VERSION = "1.0.0"
+PERIOD_PHRASE_CONTRACT_VERSION = "1.0.1"
 PERIOD_OUTCOMES = ("resolved", "needs_clarification", "invalid_period")
 
 _CHINESE_DIGIT_VALUES = {
@@ -411,12 +411,12 @@ EXPLICIT_DATE_RANGE_SEPARATORS = (
     "-",
 )
 
-UNSUPPORTED_DATE_RANGE_CONNECTORS = (
-    "until",
-    "till",
-    "up to",
-    "截至",
-    "截止",
+INDEPENDENT_DATE_PERIOD_JOINERS = (
+    "and",
+    "與",
+    "和",
+    "及",
+    "以及",
 )
 
 
@@ -556,10 +556,15 @@ PERIOD_PHRASE_CONTRACT = {
             "pattern": "unsupported_date_range_connector",
             "outcome": "needs_clarification",
         },
+        {
+            "pattern": "unconsumed_period_residue",
+            "outcome": "needs_clarification",
+        },
     ],
     "explicit_date": {
         "format": "YYYY-MM-DD",
         "range_separators": list(EXPLICIT_DATE_RANGE_SEPARATORS),
+        "independent_period_joiners": list(INDEPENDENT_DATE_PERIOD_JOINERS),
         "slash_format": "invalid_period",
     },
 }
@@ -905,13 +910,12 @@ _DATE_RANGE_PATTERN = re.compile(
     rf"\s*(?P<separator>{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})\s*"
     rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<end>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
 )
-_UNSUPPORTED_DATE_RANGE_PATTERN = re.compile(
-    rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<start>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
-    rf"\s*(?P<connector>{_alternatives(UNSUPPORTED_DATE_RANGE_CONNECTORS)})\s*"
-    rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<end>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
-)
 _DATE_SINGLE_PATTERN = re.compile(
     rf"(?<!{_DATE_TOKEN_BOUNDARY}){_ISO_DATE_LIKE}(?!{_DATE_TOKEN_BOUNDARY})"
+)
+_DATE_PERIOD_JOINER_PATTERN = re.compile(
+    rf"[\s,，、;；:：]*(?:{_alternatives(INDEPENDENT_DATE_PERIOD_JOINERS)})?"
+    rf"[\s,，、;；:：]*"
 )
 # Keep a second, deliberately permissive candidate pattern so a date with
 # attached digits/ASCII letters, invalid component widths, or missing/non-numeric
@@ -920,7 +924,7 @@ _DATE_SINGLE_PATTERN = re.compile(
 # valid-looking date.  The component character class deliberately excludes
 # punctuation so normal sentence punctuation after a valid date remains safe.
 _DATE_LIKE_CANDIDATE_PATTERN = re.compile(
-    rf"[A-Za-z0-9_]*\d{{4}}[-/][A-Za-z0-9_]*[-/][A-Za-z0-9_]*"
+    rf"[A-Za-z0-9_]*\d{{4}}\s*[-/]\s*[A-Za-z0-9_]*\s*[-/]\s*[A-Za-z0-9_]*"
 )
 _FRACTIONAL_QUANTITY = r"[-−－]?\s*\d+[.．]\d+"
 _FRACTIONAL_PERIOD_PATTERN = re.compile(
@@ -949,6 +953,33 @@ _PERIOD_CANDIDATE_PATTERN = re.compile(
     rf"|{_alternatives(_HALF_YEAR_ZH_ALIASES)}|{_alternatives(_HALF_YEAR_EN_ALIASES)}"
     rf")"
 )
+_PERIOD_UNIT_ALIASES = tuple(
+    dict.fromkeys(
+        (
+            *_ALL_ZH_PERIOD_UNITS,
+            *_ALL_EN_PERIOD_UNITS,
+            *_HALF_YEAR_ZH_ALIASES,
+            *_HALF_YEAR_EN_ALIASES,
+        )
+    )
+)
+_PERIOD_QUANTITY = (
+    rf"[-−－]?\s*(?:\d+(?:[.．]\d+)?|{_ENGLISH_QUANTITY}|[{_CHINESE_NUMBER_CHARS}]+)"
+)
+# These patterns run only after the contract-owned matches.  They identify a
+# period-shaped fragment that the grammar did not consume, including a
+# missing/unknown prefix or unit, so the caller cannot silently treat it as
+# an ordinary metric qualifier.
+_PERIOD_QUANTITY_RESIDUE_PATTERN = re.compile(
+    rf"(?<![a-z0-9]){_PERIOD_QUANTITY}\s*"
+    rf"{_alternatives(_PERIOD_UNIT_ALIASES)}(?![a-z0-9])"
+)
+_RELATIVE_QUANTITY_RESIDUE_PATTERN = re.compile(
+    rf"(?<![a-z0-9])(?:{_alternatives(_ALL_RELATIVE_EN_PREFIXES + (_THIS_EN_PREFIX,))})"
+    rf"\s+{_PERIOD_QUANTITY}(?![a-z0-9])"
+    rf"|(?<![a-z0-9])(?:{_alternatives(_CANDIDATE_ZH_PREFIXES)})"
+    rf"\s*{_PERIOD_QUANTITY}(?![a-z0-9])"
+)
 
 _GROUPING_PATTERN = re.compile(
     rf"(?:"
@@ -961,6 +992,81 @@ _GROUPING_PATTERN = re.compile(
 
 def _match_is_covered(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
     return any(start <= span[0] and span[1] <= end for start, end in spans)
+
+
+def _is_independent_date_period_joiner(value: str) -> bool:
+    return _DATE_PERIOD_JOINER_PATTERN.fullmatch(value) is not None
+
+
+def _unsupported_date_range_matches(
+    text: str,
+    occupied: list[tuple[int, int]],
+) -> tuple[list[PeriodPhraseMatch], list[tuple[int, int]]]:
+    """Reject unrecognized connective text between adjacent date tokens.
+
+    A valid range is already represented by one occupied span.  For every
+    remaining adjacent pair, only explicit independent-period joiners may
+    leave the dates available to the single-date parser.  This keeps the
+    fallback structural rather than maintaining a growing list of rejected
+    connector words such as ``until`` or ``before``.
+    """
+
+    matches: list[PeriodPhraseMatch] = []
+    date_matches = list(_DATE_SINGLE_PATTERN.finditer(text))
+    for start_match, end_match in zip(date_matches, date_matches[1:]):
+        span = (start_match.start(), end_match.end())
+        if _match_is_covered(span, occupied):
+            continue
+        connector = text[start_match.end() : end_match.start()]
+        if _is_independent_date_period_joiner(connector):
+            continue
+        occupied.append(span)
+        phrase = text[span[0] : span[1]].strip()
+        connector_text = connector.strip() or "(無連接文字)"
+        matches.append(
+            PeriodPhraseMatch(
+                phrase=phrase,
+                outcome="needs_clarification",
+                span=span,
+                window_kind="explicit_date",
+                reason_code="unsupported_date_range_connector",
+                message=(
+                    f"日期之間的連接文字 {connector_text!r} 不在支援的日期 contract "
+                    "語法中；請使用明確的 range separator，或分開說明各個期間。"
+                ),
+            )
+        )
+    return matches, occupied
+
+
+def _period_residue_matches(
+    text: str,
+    occupied: list[tuple[int, int]],
+) -> tuple[list[PeriodPhraseMatch], list[tuple[int, int]]]:
+    """Return period-shaped fragments left unconsumed by the contract parser."""
+
+    matches: list[PeriodPhraseMatch] = []
+    for pattern in (
+        _PERIOD_QUANTITY_RESIDUE_PATTERN,
+        _RELATIVE_QUANTITY_RESIDUE_PATTERN,
+    ):
+        for match in pattern.finditer(text):
+            span = match.span()
+            if _match_is_covered(span, occupied):
+                continue
+            phrase = match.group(0).strip()
+            occupied.append(span)
+            outcome, reason_code, message = _invalid_candidate_outcome(phrase)
+            matches.append(
+                PeriodPhraseMatch(
+                    phrase=phrase,
+                    outcome=outcome,
+                    span=span,
+                    reason_code=reason_code,
+                    message=message,
+                )
+            )
+    return matches, occupied
 
 
 def _date_error(
@@ -1132,25 +1238,8 @@ def _explicit_date_matches(
             )
         )
 
-    for match in _UNSUPPORTED_DATE_RANGE_PATTERN.finditer(text):
-        span = match.span()
-        if _match_is_covered(span, occupied):
-            continue
-        occupied.append(span)
-        connector = match.group("connector")
-        matches.append(
-            PeriodPhraseMatch(
-                phrase=match.group(0).strip(),
-                outcome="needs_clarification",
-                span=span,
-                window_kind="explicit_date",
-                reason_code="unsupported_date_range_connector",
-                message=(
-                    f"日期區間連接詞 {connector!r} 不在支援的 contract range "
-                    "separators 中，請改用明確且受支援的日期區間格式。"
-                ),
-            )
-        )
+    unsupported_matches, occupied = _unsupported_date_range_matches(text, occupied)
+    matches.extend(unsupported_matches)
 
     for match in _DATE_SINGLE_PATTERN.finditer(text):
         span = match.span()
@@ -1526,6 +1615,9 @@ def resolve_period_intent(
             )
         )
 
+    residue_matches, occupied = _period_residue_matches(text, occupied)
+    matches.extend(residue_matches)
+
     matches.sort(key=lambda item: item.span)
     invalid_matches = [match for match in matches if match.outcome == "invalid_period"]
     clarification_matches = [
@@ -1774,7 +1866,10 @@ def period_instruction(policy: Any = None) -> str:
         "or switch data tools to work around the limit. The contract vocabulary is: "
         f"{families}. Fixed previous-period comparison is an implicit traffic-summary "
         "report modifier and does not increase requested_days. Invalid or ambiguous "
-        "period phrases require clarification; they must never be silently normalized."
+        "period phrases require clarification; they must never be silently normalized. "
+        f"Between two explicit date tokens, only these independent-period joiners are "
+        f"allowed: {INDEPENDENT_DATE_PERIOD_JOINERS!r}; any other connective text "
+        "requires clarification rather than counting the endpoints separately."
     )
 
 

@@ -13,12 +13,13 @@ from period_contract import (
     period_contract_inventory,
     period_instruction,
     period_limit_message,
+    PeriodIntent,
     resolve_period_intent,
 )
 from semantic_catalog import SemanticCatalog, semantic_catalog
 
 
-CAPABILITY_REGISTRY_VERSION = "1.2.0"
+CAPABILITY_REGISTRY_VERSION = "1.2.1"
 
 
 def _active_query_policy(policy: Any = None) -> Any:
@@ -115,6 +116,10 @@ the normal compact result.
     "traffic_summary": """
 Get GA4 traffic summary by the customer's registered formal name or exact
 managed alias and date range.
+
+The request may contain one user-specified current date range. The previous
+period is generated implicitly by the report contract; two user-specified
+date ranges cannot be represented by this tool and require clarification.
 
 Returns current period, previous period, and percentage change for total
 sessions, total users, new users, and returning users. When status is ok,
@@ -225,6 +230,10 @@ SUPPORTED_CAPABILITIES = (
         "description": "查詢 sessions、users、new users 與 returning users 的期間摘要及每日序列。",
         "data_source": "ga4",
         "tools": ("traffic_summary",),
+        "period_constraints": {
+            "max_explicit_periods": 1,
+            "comparison": "implicit_previous_only",
+        },
     },
     {
         "capability_id": "ga4_semantic_metrics",
@@ -238,6 +247,7 @@ SUPPORTED_CAPABILITIES = (
 
 CONSENT_LIMITATIONS = (
     "GA4 semantic catalog 中已發布的唯讀 metrics。",
+    "traffic_summary 只接受一個使用者指定的 current period；前期由 report contract 隱含產生。",
     "客戶、profile、project 與 dataset 只能由 tenant registry 解析。",
     "日期、單一 job、request 合計、timeout 與每日 BigQuery quota 均有服務端限制。",
     "不接受任意 BigQuery 或 SQL，也不提供資料新增、修改或刪除。",
@@ -714,6 +724,28 @@ class CapabilityRegistry:
                 period=period_result,
             )
 
+        if is_traffic_request:
+            period_capability_error = self._period_capability_error(
+                "ga4_traffic_summary",
+                period_intent,
+            )
+            if period_capability_error is not None:
+                reason_code, message = period_capability_error
+                return self._resolution(
+                    request=request,
+                    resolution="needs_clarification",
+                    reason_code=reason_code,
+                    message=message,
+                    next_action={
+                        "type": "ask_user",
+                        "question": (
+                            "請提供一個 current date range；若要比較另一段自訂期間，"
+                            "請改用支援多段期間的分析方式。"
+                        ),
+                    },
+                    period=period_result,
+                )
+
         unresolved_clause = self._unresolved_mixed_clause(normalized_request)
         if unresolved_clause is not None:
             return self._resolution(
@@ -1021,6 +1053,40 @@ class CapabilityRegistry:
             self._customer_qualifier_pattern.fullmatch(normalized)
             or is_query_context_clause(normalized)
         )
+
+    @staticmethod
+    def _period_capability_error(
+        capability_id: str,
+        period_intent: PeriodIntent,
+    ) -> tuple[str, str] | None:
+        """Validate that a resolved period fits the selected tool contract."""
+
+        capability = next(
+            (
+                item
+                for item in SUPPORTED_CAPABILITIES
+                if item["capability_id"] == capability_id
+            ),
+            None,
+        )
+        if capability is None:
+            return None
+        constraints = capability.get("period_constraints")
+        if not isinstance(constraints, dict):
+            return None
+        max_explicit_periods = constraints.get("max_explicit_periods")
+        if (
+            isinstance(max_explicit_periods, int)
+            and len(period_intent.explicit_periods) > max_explicit_periods
+        ):
+            return (
+                "traffic_comparison_not_representable",
+                (
+                    "traffic_summary 只能表示一個使用者指定的 current date range；"
+                    "前期只能由 report contract 自動產生，無法直接執行兩個自訂日期區間。"
+                ),
+            )
+        return None
 
     def _has_catalog_match(
         self,

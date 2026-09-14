@@ -192,6 +192,9 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
         for request in (
             "GA4 sessions 2026-01-01 until 2026-09-01",
             "GA4 sessions 2026-01-01 截至 2026-09-01",
+            "GA4 sessions 2026-01-01 before 2026-09-01",
+            "GA4 sessions 2026-01-01 之前 2026-09-01",
+            "GA4 sessions 2026-01-01 foo 2026-09-01",
         ):
             with self.subTest(request=request):
                 result = resolve_period_intent(
@@ -249,6 +252,24 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                 self.assertEqual(result.reason_code, "ambiguous_period")
                 self.assertEqual(result.requested_days, 0)
 
+    def test_unconsumed_period_residue_never_resolves_as_no_period(self):
+        for phrase in (
+            "pas 7 days",
+            "past 7 fortnights",
+            "past 7",
+            "7 days",
+        ):
+            with self.subTest(phrase=phrase):
+                result = resolve_period_intent(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(result.reason_code, "ambiguous_period")
+                self.assertEqual(result.requested_days, 0)
+
 
 class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
     def test_versioned_behavior_matrix_keeps_data_calls_at_zero(self):
@@ -271,6 +292,13 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                 self.assertEqual(
                     len(result["period"]["implicit_periods"]),
                     case.get("expected_implicit_periods", 0),
+                )
+                self.assertEqual(
+                    len(result["period"]["explicit_periods"]),
+                    case.get(
+                        "expected_explicit_periods",
+                        len(result["period"]["explicit_periods"]),
+                    ),
                 )
                 self.assertEqual(case["expected_bigquery_calls"], 0)
 
@@ -488,6 +516,19 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
         self.assertEqual(result["period"]["requested_days"], 90)
         self.assertEqual(len(result["period"]["explicit_periods"]), 1)
         self.assertEqual(len(result["period"]["implicit_periods"]), 1)
+
+    def test_traffic_summary_rejects_user_selected_comparison_range(self):
+        result = capability_registry.resolve(
+            "traffic summary, 2026-08-01 to 2026-08-07 and " "2026-07-01 to 2026-07-07",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+
+        self.assertEqual(result["resolution"], "needs_clarification")
+        self.assertEqual(result["reason_code"], "traffic_comparison_not_representable")
+        self.assertEqual(result["period"]["requested_days"], 14)
+        self.assertEqual(len(result["period"]["explicit_periods"]), 2)
+        self.assertEqual(len(result["period"]["implicit_periods"]), 0)
 
     def test_mixed_date_scope_keeps_only_intent_period_model(self):
         result = capability_registry.resolve(

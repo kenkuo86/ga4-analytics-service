@@ -120,8 +120,10 @@ days，因此重疊、相鄰、拆分的區段以及 `group by month` 都不能�
 明確日期必須是完整的 `YYYY-MM-DD` token；`from … to …` 與其他 contract-listed
 range separator 會被視為同一個日期區間，超出日期可處理範圍的數量也會回傳結構化
 `invalid_period`，不會造成 capability preflight 的未處理例外。
-不支援的 range connector（例如 `until`／`截至`）與非正整數期間數量（例如
-`100.5 days`）會要求釐清或回傳 `invalid_period`，不會把端點或數量靜默改成另一個查詢。
+不支援的 range connector（包含任何未列於 contract 的日期連接文字，例如
+`until`／`截至`／`before`）與非正整數期間數量（例如 `100.5 days`）會要求釐清或回傳
+`invalid_period`，不會把端點或數量靜默改成另一個查詢。日期之間只有 contract
+明列的獨立期間 joiner 才會被當成多個 explicit periods。
 
 Intent-level 上限直接讀取 active `QueryPolicy.max_date_range_days`，不在 instructions、
 metadata 或 eval implementation 寫死預設值。剛好等於上限可以繼續，上限加一天會在
@@ -134,7 +136,9 @@ tool calls、重試或改用其他 data tool。若直接呼叫 data tool，Phase
 `implicit_periods`，即使使用者說「與前期比較」也不計入 `requested_days`；只有使用者另行
 明示第二段日期，才會加入 `explicit_periods` 並以聯集計算。Phase 10 不新增
 `effective_scan_periods` 或 `effective_scan_days`，semantic metrics 仍各自保留原有
-`date_scope`，包括 `all_available_data`。
+`date_scope`，包括 `all_available_data`。`traffic_summary` 目前只能表示一個使用者指定的
+current period；若使用者提供第二個自訂日期區間，capability preflight 會要求釐清，不會將
+它誤送到只接受單一日期區間的 tool。
 
 這是 PoC 的 connector instructions 與 host behavior best-effort，不是跨 conversation 或
 跨 tool call 的伺服器端狀態／安全邊界；每個 job、tool request 與 BigQuery daily quota

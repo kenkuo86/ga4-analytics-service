@@ -21,7 +21,7 @@ class PhaseFiveCapabilityRegistryTests(unittest.TestCase):
         result = capability_registry.resolve()
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["registry_version"], "1.2.0")
+        self.assertEqual(result["registry_version"], "1.2.1")
         self.assertEqual(result["data_access"], "local_metadata_only")
         self.assertFalse(result["selection_token_required"])
         capability_lookup = next(
@@ -31,6 +31,18 @@ class PhaseFiveCapabilityRegistryTests(unittest.TestCase):
         )
         self.assertEqual(capability_lookup["data_source"], "local_metadata")
         self.assertEqual(capability_lookup["tools"], ["get_ga4_capabilities"])
+        traffic_capability = next(
+            capability
+            for capability in result["supported"]
+            if capability["capability_id"] == "ga4_traffic_summary"
+        )
+        self.assertEqual(
+            traffic_capability["period_constraints"],
+            {
+                "max_explicit_periods": 1,
+                "comparison": "implicit_previous_only",
+            },
+        )
         self.assertEqual(
             result["public_tools"],
             [

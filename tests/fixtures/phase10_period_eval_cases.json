@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.0",
+  "contract_version": "1.0.1",
   "cases": [
     {
       "case_id": "single_day_today",
@@ -723,6 +723,27 @@
       "today": "2026-09-14",
       "expected_outcome": "needs_clarification",
       "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unknown_relative_unit",
+      "phrase": "past 7 fortnights",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "period_quantity_without_prefix",
+      "phrase": "7 days",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unsupported_unknown_date_connector",
+      "phrase": "2026-01-01 before 2026-09-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "unsupported_date_range_connector"
     }
   ],
   "behavior_cases": [
@@ -765,6 +786,17 @@
       "expected_resolution": "needs_clarification",
       "expected_reason_code": "invalid_period",
       "expected_requested_days": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "traffic_custom_comparison_is_not_representable",
+      "request": "traffic summary, 2026-08-01 to 2026-08-07 and 2026-07-01 to 2026-07-07",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "traffic_comparison_not_representable",
+      "expected_requested_days": 14,
+      "expected_explicit_periods": 2,
       "expected_bigquery_calls": 0
     }
   ]
