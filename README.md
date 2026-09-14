@@ -120,6 +120,8 @@ days，因此重疊、相鄰、拆分的區段以及 `group by month` 都不能�
 明確日期必須是完整的 `YYYY-MM-DD` token；`from … to …` 與其他 contract-listed
 range separator 會被視為同一個日期區間，超出日期可處理範圍的數量也會回傳結構化
 `invalid_period`，不會造成 capability preflight 的未處理例外。
+不支援的 range connector（例如 `until`／`截至`）與非正整數期間數量（例如
+`100.5 days`）會要求釐清或回傳 `invalid_period`，不會把端點或數量靜默改成另一個查詢。
 
 Intent-level 上限直接讀取 active `QueryPolicy.max_date_range_days`，不在 instructions、
 metadata 或 eval implementation 寫死預設值。剛好等於上限可以繼續，上限加一天會在

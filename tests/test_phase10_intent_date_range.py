@@ -188,6 +188,49 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                     "invalid_date_format",
                 )
 
+    def test_unsupported_range_connectors_do_not_count_endpoints_independently(self):
+        for request in (
+            "GA4 sessions 2026-01-01 until 2026-09-01",
+            "GA4 sessions 2026-01-01 截至 2026-09-01",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(
+                    result.reason_code,
+                    "unsupported_date_range_connector",
+                )
+                self.assertEqual(result.requested_days, 0)
+
+    def test_fractional_period_quantity_is_not_ignored(self):
+        for phrase in ("past 100.5 days", "過去 100.5 天"):
+            with self.subTest(phrase=phrase):
+                result = resolve_period_intent(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "invalid_period")
+                self.assertEqual(result.reason_code, "fractional_period_quantity")
+
+    def test_date_component_width_over_two_digits_is_invalid(self):
+        for malformed_date in ("2026/009/01", "2026-009-01"):
+            with self.subTest(malformed_date=malformed_date):
+                result = resolve_period_intent(
+                    f"GA4 sessions {malformed_date}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "invalid_period")
+                self.assertEqual(result.reason_code, "invalid_date_format")
+
 
 class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
     def test_versioned_behavior_matrix_keeps_data_calls_at_zero(self):
@@ -254,6 +297,26 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
         self.assertEqual(result["resolution"], "supported")
         self.assertEqual(result["reason_code"], "ga4_semantic_metric")
         self.assertEqual(result["period"]["requested_days"], 31)
+
+    def test_unsupported_range_connector_requires_period_clarification(self):
+        for request in (
+            "GA4 sessions 2026-01-01 until 2026-09-01",
+            "GA4 sessions 2026-01-01 截至 2026-09-01",
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "ambiguous_period")
+                self.assertEqual(
+                    result["period"]["reason_code"],
+                    "unsupported_date_range_connector",
+                )
+                self.assertEqual(result["period"]["requested_days"], 0)
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
         policy = _policy(max_days=31, time_zone="UTC")
@@ -348,6 +411,35 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                     result["period"]["phrase_matches"][0]["reason_code"],
                     "period_quantity_out_of_range",
                 )
+
+    def test_fractional_period_quantity_requires_structured_clarification(self):
+        for phrase in ("past 100.5 days", "過去 100.5 天"):
+            with self.subTest(phrase=phrase):
+                result = capability_registry.resolve(
+                    f"GA4 sessions, {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "invalid_period")
+                self.assertEqual(
+                    result["period"]["reason_code"],
+                    "fractional_period_quantity",
+                )
+
+    def test_date_component_width_over_two_digits_is_not_silently_accepted(self):
+        for malformed_date in ("2026/009/01", "2026-009-01"):
+            with self.subTest(malformed_date=malformed_date):
+                result = capability_registry.resolve(
+                    f"GA4 sessions {malformed_date}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "invalid_period")
+                self.assertEqual(result["period"]["reason_code"], "invalid_date_format")
 
     def test_traffic_comparison_modifier_does_not_add_explicit_days(self):
         result = capability_registry.resolve(

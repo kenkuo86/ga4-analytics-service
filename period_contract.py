@@ -411,6 +411,14 @@ EXPLICIT_DATE_RANGE_SEPARATORS = (
     "-",
 )
 
+UNSUPPORTED_DATE_RANGE_CONNECTORS = (
+    "until",
+    "till",
+    "up to",
+    "截至",
+    "截止",
+)
+
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, Mapping):
@@ -533,12 +541,20 @@ PERIOD_PHRASE_CONTRACT = {
             "outcome": "invalid_period",
         },
         {
+            "pattern": "fractional_period_quantity",
+            "outcome": "invalid_period",
+        },
+        {
             "pattern": "unparseable_quantity_or_unnatural_combination",
             "outcome": "needs_clarification",
         },
         {
             "pattern": "slash_date_or_invalid_iso_date",
             "outcome": "invalid_period",
+        },
+        {
+            "pattern": "unsupported_date_range_connector",
+            "outcome": "needs_clarification",
         },
     ],
     "explicit_date": {
@@ -889,13 +905,30 @@ _DATE_RANGE_PATTERN = re.compile(
     rf"\s*(?P<separator>{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})\s*"
     rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<end>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
 )
+_UNSUPPORTED_DATE_RANGE_PATTERN = re.compile(
+    rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<start>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
+    rf"\s*(?P<connector>{_alternatives(UNSUPPORTED_DATE_RANGE_CONNECTORS)})\s*"
+    rf"(?<!{_DATE_TOKEN_BOUNDARY})(?P<end>{_ISO_DATE_LIKE})(?!{_DATE_TOKEN_BOUNDARY})"
+)
 _DATE_SINGLE_PATTERN = re.compile(
     rf"(?<!{_DATE_TOKEN_BOUNDARY}){_ISO_DATE_LIKE}(?!{_DATE_TOKEN_BOUNDARY})"
 )
 # Keep a second, deliberately permissive candidate pattern so a date with
-# attached digits/ASCII letters (for example 2026-09-01abc) is rejected as an
-# invalid token instead of being silently shortened to 2026-09-01.
-_DATE_LIKE_CANDIDATE_PATTERN = re.compile(rf"[A-Za-z0-9]*{_ISO_DATE_LIKE}[A-Za-z0-9]*")
+# attached digits/ASCII letters or invalid component widths (for example
+# 2026-09-01abc or 2026/009/01) are rejected as invalid tokens instead of
+# being silently shortened to a valid-looking date.
+_DATE_LIKE_CANDIDATE_PATTERN = re.compile(
+    rf"[A-Za-z0-9]*\d{{4}}[-/]\d+[-/]\d+[A-Za-z0-9]*"
+)
+_FRACTIONAL_QUANTITY = r"[-−－]?\s*\d+[.．]\d+"
+_FRACTIONAL_PERIOD_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])(?:{_alternatives(_ALL_RELATIVE_EN_PREFIXES + (_THIS_EN_PREFIX,))})\s+"
+    rf"{_FRACTIONAL_QUANTITY}\s+{_alternatives(_ALL_EN_PERIOD_UNITS + _HALF_YEAR_EN_ALIASES)}(?![a-z0-9])"
+    rf"|(?<![a-z0-9])(?:{_alternatives(_CANDIDATE_ZH_PREFIXES)})\s*"
+    rf"{_FRACTIONAL_QUANTITY}\s*{_alternatives(_ALL_ZH_PERIOD_UNITS)}"
+    rf")"
+)
 
 _COMPARISON_PATTERN = re.compile(
     rf"(?<![a-z0-9]){_alternatives(COMPARISON_MODIFIER_PHRASES)}(?![a-z0-9])"
@@ -1004,6 +1037,12 @@ def _invalid_candidate_outcome(phrase: str) -> tuple[str, str, str]:
             "invalid_period_combination",
             "這個期間詞的數量與 window kind 組合不合法。",
         )
+    if re.search(r"\d+[.]\d+", normalized):
+        return (
+            "invalid_period",
+            "fractional_period_quantity",
+            "期間數量必須是正整數，不支援小數。",
+        )
     return (
         "needs_clarification",
         "ambiguous_period",
@@ -1088,6 +1127,26 @@ def _explicit_date_matches(
                 window_kind="explicit_date",
                 start_date=start,
                 end_date=end,
+            )
+        )
+
+    for match in _UNSUPPORTED_DATE_RANGE_PATTERN.finditer(text):
+        span = match.span()
+        if _match_is_covered(span, occupied):
+            continue
+        occupied.append(span)
+        connector = match.group("connector")
+        matches.append(
+            PeriodPhraseMatch(
+                phrase=match.group(0).strip(),
+                outcome="needs_clarification",
+                span=span,
+                window_kind="explicit_date",
+                reason_code="unsupported_date_range_connector",
+                message=(
+                    f"日期區間連接詞 {connector!r} 不在支援的 contract range "
+                    "separators 中，請改用明確且受支援的日期區間格式。"
+                ),
             )
         )
 
@@ -1371,6 +1430,23 @@ def resolve_period_intent(
             matches.append(phrase_match)
             if interval is not None:
                 explicit_periods.append(interval)
+
+    for match in _FRACTIONAL_PERIOD_PATTERN.finditer(text):
+        span = match.span()
+        if _match_is_covered(span, occupied):
+            continue
+        phrase = match.group(0).strip()
+        occupied.append(span)
+        outcome, reason_code, message = _invalid_candidate_outcome(phrase)
+        matches.append(
+            PeriodPhraseMatch(
+                phrase=phrase,
+                outcome=outcome,
+                span=span,
+                reason_code=reason_code,
+                message=message,
+            )
+        )
 
     for match in _FIXED_PATTERN.finditer(text):
         span = match.span()
