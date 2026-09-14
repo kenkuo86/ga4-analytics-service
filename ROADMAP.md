@@ -13,7 +13,7 @@
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
 - 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
 
-目前 Phase 4–9 的功能 roadmap 已全部完成。其餘工作以持續監控成本、權限、tenant registry 品質及 connector 行為為主。
+目前 Phase 4–9 已完成，下一階段為 Phase 10 的使用者需求層級日期邊界。其餘工作包含持續監控成本、權限、tenant registry 品質及 connector 行為。
 
 ## Completed foundations
 
@@ -77,7 +77,7 @@ Dependencies: Foundations 1–2
 
 ## Implementation roadmap
 
-以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–9 已全部完成。
+以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–9 已完成，Phase 10 尚待實作。
 
 ### Phase 4: unified query cost controls
 
@@ -285,9 +285,62 @@ Dependencies: Phases 5–6
 - 新增或移除公開能力時，有測試提醒同步更新或可直接由 metadata 產生內容。
 - OAuth approve、deny、PKCE 與 redirect flow 不因視覺改版而回歸。
 
+### Phase 10: intent-level date-range boundary
+
+Status: Planned
+
+Dependencies: Phases 4–5
+
+Phase 4 已完成的 `QueryPolicy` 會驗證每個 `query_ga4`、`traffic_summary` 或 REST request
+收到的日期範圍，但目前無法辨識多個合法 tool calls 是否源自同一個超過 90 天的使用者需求。
+因此 host model 仍可能先將半年需求拆成數個不超過 90 天的區段，分別查詢後再合併結果。
+
+本階段是 PoC 的 connector 行為契約與部署後對話驗收，不新增跨 tool call 的伺服器端狀態、
+query token 或每位使用者累積期間限制。單一 tool call 的日期與成本安全邊界仍由 Phase 4
+的 `QueryPolicy` 強制執行；intent-level 限制屬於 host tool-choice 的 best-effort 保證，
+不得描述成無法繞過的 server-side security boundary。
+
+#### Goal
+
+當使用者要求分析的完整期間超過設定的 90 天上限時，connector 應在查詢客戶資料前直接
+說明限制並請使用者縮小期間，不得自行以月份、相鄰日期區段、多次 tool calls 或重試拆分查詢。
+
+#### Scope
+
+1. 在中央 capability registry 定義 `requested_period`：使用者當次分析需求明確或可合理解析的完整起訖期間，日期上限以含起訖日計算。
+2. 更新 server instructions、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與 `traffic_summary` 的公開說明：
+   - 90 天限制適用於完整使用者需求，不只是模型準備送出的單一 tool call。
+   - 完整期間超過 90 天時，不得以月份拆分、相鄰區段、分頁、改用其他 data tool 或失敗後重試來完成原需求。
+   - 應回覆限制、實際要求天數及允許上限，並要求使用者選擇一個不超過 90 天的新期間。
+3. 對相對期間使用 policy timezone（預設 `Asia/Taipei`）解析；「過去半年」、「最近六個月」等明顯超限表述不需先查詢 tenant registry 或 BigQuery 才能拒絕。
+4. 新增 versioned connector behavior eval cases，至少涵蓋：
+   - 「查詢過去半年資料，按月 group」：直接拒絕，且不呼叫 tenant registry 或 tenant data query。
+   - 「把過去半年拆成三段查」：仍直接拒絕。
+   - 先收到 `date_range_too_large` 後，不以較小區段自動重試。
+   - 90 天（含起訖日）可繼續正常 capability／metric 流程，91 天則拒絕。
+   - 相對日期、跨年、閏年及月底的期間判斷符合 policy timezone。
+5. 將相同案例納入實際 Claude Custom Connector 的部署後對話驗收，記錄 tool calls、是否接觸 tenant registry／tenant data，以及最終回答措辭。
+6. README 與 consent limitation 應區分「單一 tool call 的 server-side 強制限制」和「完整使用者需求的 connector 行為限制」，避免對 PoC 保證程度造成誤解。
+
+#### Out of scope for this PoC phase
+
+1. 不建立跨 conversation 或跨 tool call 的持久 request state。
+2. 不要求由 preflight 簽發並由 data query 強制攜帶 selection／query token。
+3. 不以 OAuth `sub` 累計相鄰日期區段，也不新增每位終端使用者的 daily query quota。
+4. 不宣稱能阻止惡意 client、不同 conversation 或刻意直接呼叫多個合法區段；成本底線仍由每個 job、每個 tool request 與 BigQuery project daily quota 保護。
+
+#### Acceptance criteria
+
+- Versioned behavior eval 對明確超過 90 天的完整需求回傳限制說明，且預期 tenant registry 與 tenant data query 呼叫數皆為零。
+- 實際 Claude connector 對「過去半年、按月彙總」不拆分查詢，會要求使用者提供不超過 90 天的新期間。
+- 收到結構化 `date_range_too_large` 後，host 不會自動縮短、拆分或改用另一個 data tool 重試。
+- 90 天與 91 天的邊界，以及相對日期、跨年、閏年與月底案例均有測試或部署後驗收紀錄。
+- 文件及 consent page 清楚揭露：單次 tool call 限制由服務端強制，完整使用者需求限制在 PoC 階段依賴 connector instructions 與 host behavior。
+- Phase 4 既有 semantic、traffic summary、REST 與 MCP 日期／成本測試持續通過。
+
 ## Ongoing operational work
 
-以下項目是功能 roadmap 完成後的持續性營運工作，每次正式發布前都應持續執行：
+以下項目是與功能 roadmap 並行的持續性營運工作，每次正式發布前都應持續執行：
 
 1. 維護 tenant registry 名稱、alias、狀態、project 與 ecommerce profile 品質。
 2. 對所有 active tenants 執行代表性 metric dry-run，確認 schema 及 IAM 沒有 drift。
