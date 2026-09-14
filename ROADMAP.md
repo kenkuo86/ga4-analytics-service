@@ -335,7 +335,7 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
    | Rolling years | 過去／最近／近 N 年 | `past`／`recent`／有明確 N 的 `last N years` | 將 today 往前移 N 年，`02-29` 在非閏年 clamp 至 `02-28`，再加一天為 start；end 為 today。 |
    | Completed years | 前 N 年、去年 | `previous N years`、無明確 N 的 `last year` | 完整 calendar years，不包含今年。 |
    | Year to date | 今年 | `this year` | 當年 `01-01` 至 today。 |
-   | Explicit range | `YYYY-MM-DD` 起訖日期 | `YYYY-MM-DD` start／end dates | 使用明示日期，含起訖日；格式、順序、未來日期及 earliest date 沿用 Phase 4 policy。斜線日期等已被舊 qualifier regex 辨識但不符合 ISO contract 的形式回傳 `invalid_period`，不得靜默正規化。 |
+   | Explicit date／range | 單一 `YYYY-MM-DD` 或 `YYYY-MM-DD` 起訖日期 | One `YYYY-MM-DD` date or `YYYY-MM-DD` start／end dates | 單一日期解析為 `start_date=end_date=該日期`、`requested_days=1`；起訖範圍包含兩端。格式、順序、未來日期及 earliest date 沿用 Phase 4 policy。斜線日期等已被舊 qualifier regex 辨識但不符合 ISO contract 的形式回傳 `invalid_period`，不得靜默正規化。 |
 
    其他無法唯一判斷 window kind、anchor 或數量的表述一律回傳 `needs_clarification`，不得自行選擇語意或查詢客戶資料。
 5. 更新 server instructions、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與 `traffic_summary` 的公開說明：active limit 適用於完整使用者需求；超限時不得拆分、分頁、改用其他 data tool 或自動重試。README 與 consent limitation 必須區分 intent-level best-effort behavior、單次 tool call server enforcement 與 effective scan cost controls。
@@ -344,6 +344,7 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
    - 所有相對日期 fixtures 注入固定 today 與 policy timezone；覆蓋 today inclusion、ISO week、月底 clamp、跨年、閏年、明確範圍、多區間聯集及語意不明。
    - 固定 `today=2026-09-14`：「近三個月」與「過去三個月」皆為 `2026-06-15` 至 `2026-09-14`、共 92 天；「過去半年、按月 group」為 `2026-03-15` 至 `2026-09-14`、共 184 天；「過去 13 週」為 `2026-06-16` 至 `2026-09-14`、共 91 天。
    - 固定 `today=2026-09-16`：「前兩週」為 `2026-08-31` 至 `2026-09-13`、共 14 天。固定 `today=2024-02-29`：「過去一年」為 `2023-03-01` 至 `2024-02-29`、共 366 天；「去年」為 `2023-01-01` 至 `2023-12-31`、共 365 天。
+   - 單獨的 `2026-09-01` 解析為 `start_date=end_date=2026-09-01`、`requested_days=1`；相同日期使用斜線格式 `2026/09/01` 時回傳 `invalid_period`。
    - 一般邊界以 `max_date_range_days` 參數化：剛好 `max_date_range_days` 天可繼續，`max_date_range_days+1` 天拒絕；另驗證 `GA4_QUERY_MAX_DAYS=31` 時 31 天可繼續、32 天拒絕，metadata、instructions 與錯誤訊息均顯示 31。
    - `traffic_summary` 在預設 limit 90、current period 為 `2026-06-17` 至 `2026-09-14` 時，`requested_days=90`，自動 previous period 為 `2026-03-19` 至 `2026-06-16`，`effective_scan_days=180`；intent boundary 應允許，兩段仍須通過 Phase 4 policy。若使用者明確要求這兩段，則 `requested_days=180` 並拒絕。
    - 「把過去半年拆成三段查」及先收到 `date_range_too_large` 後縮短、拆分或改用另一 data tool 的情境，預期 tenant registry 與 tenant data query 呼叫數皆為零。
