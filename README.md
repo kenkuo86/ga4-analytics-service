@@ -108,6 +108,35 @@ connector eval 驗收。
 `day_index` 對齊，缺失日期已由服務補成 0。`headline_metrics` 提供同一份查詢的
 期間總覽，不能由每日資料重新推算 distinct users。
 
+## Intent-level date boundary
+
+`period_contract.py` 是相對期間 vocabulary、解析規則、capability metadata、server
+instructions 與 Phase 10 eval fixture 的 versioned 單一來源，目前 contract version 為
+`1.0.0`。它會將使用者需求標準化為 `explicit_periods`、`requested_days` 與
+`implicit_periods`：`requested_days` 是所有 explicit periods 聯集中的不重複 calendar
+days，因此重疊、相鄰、拆分的區段以及 `group by month` 都不能繞過限制。相對期間以
+`GA4_QUERY_TIME_ZONE` 的 today 為 anchor，無法唯一判斷的數量或 window kind 會要求釐清，
+無效日期與斜線日期會回傳 `invalid_period`，不會被靜默移除或正規化。
+
+Intent-level 上限直接讀取 active `QueryPolicy.max_date_range_days`，不在 instructions、
+metadata 或 eval implementation 寫死預設值。剛好等於上限可以繼續，上限加一天會在
+`get_ga4_capabilities` 的本機階段回傳 `date_range_too_large`，不建立 tenant registry 或
+BigQuery data query。Host 應要求使用者縮小完整期間，不得自行拆成月份、相鄰區段、多次
+tool calls、重試或改用其他 data tool。若直接呼叫 data tool，Phase 4 的單次 server-side
+`QueryPolicy` 仍會在 tenant registry 前阻擋超限日期。
+
+`traffic_summary` 的 previous comparison 是固定 report contract 自動加入的
+`implicit_periods`，即使使用者說「與前期比較」也不計入 `requested_days`；只有使用者另行
+明示第二段日期，才會加入 `explicit_periods` 並以聯集計算。Phase 10 不新增
+`effective_scan_periods` 或 `effective_scan_days`，semantic metrics 仍各自保留原有
+`date_scope`，包括 `all_available_data`。
+
+這是 PoC 的 connector instructions 與 host behavior best-effort，不是跨 conversation 或
+跨 tool call 的伺服器端狀態／安全邊界；每個 job、tool request 與 BigQuery daily quota
+仍由 Phase 4 保護。固定 today、中文／英文 phrase families、unit aliases、數量格式、聯集、
+閏年、ISO week、月底 clamp 及三種 period outcome 的矩陣位於
+`tests/fixtures/phase10_period_eval_cases.json`。
+
 ## Query provenance
 
 `query_ga4` 與 `traffic_summary` 的 `include_query` 預設為 `false`。只有使用者明確要求
