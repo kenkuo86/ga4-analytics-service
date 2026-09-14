@@ -308,37 +308,46 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
 
 #### Scope
 
-1. 在中央 capability registry 定義 `requested_period`：使用者當次分析需求明確或可 deterministic 解析的完整起訖期間，日期上限以含起訖日計算。
-   - intent-level boundary 必須使用 data tools 同一個 active `QueryPolicy.max_date_range_days`，不得在 instructions、metadata 或 eval implementation 另行寫死 90。
-   - capability metadata 應顯示 active limit；目前的 90 天只能作為預設設定及範例，而不是固定產品常數。
-2. 更新 server instructions、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與 `traffic_summary` 的公開說明：
-   - active limit 適用於完整使用者需求，不只是模型準備送出的單一 tool call。
-   - 完整期間超過 active limit 時，不得以月份拆分、相鄰區段、分頁、改用其他 data tool 或失敗後重試來完成原需求。
-   - 應回覆限制、可 deterministic 計算的實際要求天數及 active limit，並要求使用者選擇一個未超限的新期間。
-3. 相對期間必須以 active policy timezone（預設 `Asia/Taipei`）的今天作為 anchor date，並採以下 calendar semantics：
-   - 「過去／最近 N 天」包含今天，`end_date=today`，`start_date=today-(N-1 days)`；「前 N 天」不包含今天，`end_date=yesterday`，`start_date=today-N days`。「今天」與「昨天」各代表對應的單日。
-   - 「過去／最近 N 週」代表截至今天的 rolling period，包含今天，`end_date=today`，`start_date=today-(7*N-1 days)`；因此每週固定為 7 天，不受 calendar week 邊界影響。
-   - 「前 N 週／前 N 個完整週」以 ISO week（週一至週日）計算、不包含本週；`end_date` 是本週一的前一天，`start_date=end_date-(7*N-1 days)`。「本週／這週」是本週一至今天，「上週」是上一個週一至週日。
-   - 「過去／最近 N 個月」及「過去半年」代表截至今天的 rolling calendar-month window；先將 today 往前移 N 個 calendar months，若目標月份不存在同一日則 clamp 至該月月底，再加一天作為 `start_date`，`end_date=today`。
-   - 「前 N 個月／前 N 個完整月份」不包含本月，`start_date` 是 N 個月前的第一天，`end_date` 是上個月最後一天。「本月／這個月」是本月第一天至今天，「上個月」是上月第一天至最後一天。
-   - 「過去／最近 N 年」代表截至今天的 rolling calendar-year window；先將 today 往前移 N 年，若目標年份沒有同一日期（例如 `02-29`）則 clamp 至 `02-28`，再加一天作為 `start_date`，`end_date=today`。
-   - 「前 N 年／前 N 個完整年」不包含今年，`start_date` 是 N 年前的 `01-01`，`end_date` 是去年的 `12-31`。「今年」是當年 `01-01` 至今天，「去年」是去年 `01-01` 至 `12-31`。
-   - 等價英文中，`past`／`recent N` 及有明確數量的 `last N` 採 rolling semantics；`previous N` 採 completed semantics，單獨的 `last week`／`last month`／`last year` 也代表上一個完整 calendar unit。其他無法判斷是 rolling period 或 completed calendar units 的表述回傳 `needs_clarification`，不得自行選擇語意或查詢客戶資料。
-   - 「過去半年」、「最近六個月」等 deterministic 且明顯超限的表述不需先查詢 tenant registry 或 BigQuery 才能拒絕。
-4. 新增 versioned connector behavior eval cases，至少涵蓋：
-   - 固定 `today=2026-09-14` 時，「查詢過去半年資料，按月 group」解析為 `2026-03-15` 至 `2026-09-14`、共 184 天；在預設上限 90 天時直接拒絕，且不呼叫 tenant registry 或 tenant data query。
-   - 「把過去半年拆成三段查」：仍直接拒絕。
-   - 先收到 `date_range_too_large` 後，不以較小區段自動重試。
-   - 一般邊界測試使用 `max_date_range_days`：剛好 `max_date_range_days` 天可繼續正常 capability／metric 流程，`max_date_range_days+1` 天則拒絕。
-   - 非預設設定 `GA4_QUERY_MAX_DAYS=31` 時，31 天可繼續、32 天拒絕，公開 metadata 與錯誤訊息均顯示 31。
-   - 固定 `today=2024-05-31` 時，「過去三個月」依月底 clamp 解析為 `2024-03-01` 至 `2024-05-31`、共 92 天。
-   - 固定 `today=2026-09-14` 時，「前三個完整月份」解析為 `2026-06-01` 至 `2026-08-31`、共 92 天。
-   - 固定 `today=2026-09-14` 時，「過去 13 週」解析為 `2026-06-16` 至 `2026-09-14`、共 91 天，在預設上限 90 天時拒絕。
-   - 固定 `today=2026-09-16` 時，「前兩週」解析為 `2026-08-31` 至 `2026-09-13`、共 14 天。
-   - 固定 `today=2024-02-29` 時，「過去一年」依 leap-day clamp 解析為 `2023-03-01` 至 `2024-02-29`、共 366 天；「去年」解析為 `2023-01-01` 至 `2023-12-31`、共 365 天。
-   - 另以固定 today 覆蓋跨年案例；所有相對日期 fixture 必須注入 today 與 policy timezone，不得依測試執行日浮動。
-5. 將相同案例納入實際 Claude Custom Connector 的部署後對話驗收，記錄 tool calls、是否接觸 tenant registry／tenant data，以及最終回答措辭。
-6. README 與 consent limitation 應區分「單一 tool call 的 server-side 強制限制」和「完整使用者需求的 connector 行為限制」，避免對 PoC 保證程度造成誤解。
+1. 建立單一、versioned 的 `period_phrase_contract` 作為相對期間 vocabulary、解析規則、capability metadata、server instructions 與 eval fixtures 的共同來源；不得再由 `_period_qualifier_pattern` 或 tool description 個別維護另一份可辨識詞彙。
+   - 每個被辨識的 phrase 必須完整對應到 `resolved`、`needs_clarification` 或 `invalid_period` 其中一種結果；不得先將 period qualifier 從 request 移除，卻沒有定義它的日期語意。
+   - 數量 `N` 必須正規化為正整數；支援的阿拉伯數字、中英文數字、單複數、`週／周／星期` 與「半年」alias 都必須由 contract 明列。零、負數、無法解析的數量或不自然組合不得猜測。
+   - 新增或移除 period phrase 時，contract inventory test 必須同步提醒 parser、instructions 與 fixtures，避免再次出現「已辨識但未定義」的單位或前綴。
+2. 定義 intent-level 的標準化結果，不使用含義不明的單一 `requested_period`：
+   - `explicit_periods` 是使用者明確要求，或可由 `period_phrase_contract` deterministic 解析出的所有日期區間；每個區間皆包含起訖日。
+   - `requested_days` 是所有 `explicit_periods` 聯集中的不重複 calendar days 數；拆分、相鄰區段或重疊區段都以聯集計算，因此不能用多個較小區段規避限制。grouping grain（例如按月 group）不改變 `requested_days`。
+   - `implicit_periods` 是 tool contract 自動加入、但使用者沒有另外要求的區間，例如 `traffic_summary` 的等長 previous comparison period；它不計入 intent-level `requested_days`。
+   - `effective_scan_periods` 記錄實際會讀取的 explicit 與 implicit periods，`effective_scan_days` 是其日期聯集天數，供 Phase 4 的 earliest-date、bytes、timeout 及 daily quota policy 使用；不得把 intent-level 天數限制誤述為實際掃描天數限制。
+   - `date_scope=all_available_data` 的 semantic metric 沒有可由 request 縮小的有效掃描期間；其 explicit period 仍用於 intent boundary，但 `effective_scan_periods=all_available_data`、`effective_scan_days=null`，結果必須保留既有 `date_scope` 說明，實際成本仍由 Phase 4 bytes policy 保護。
+3. intent-level boundary 必須使用 data tools 同一個 active `QueryPolicy.max_date_range_days`，不得在 instructions、metadata 或 eval implementation 寫死目前預設的 90。當 `requested_days` 超過 active limit 時，在 tenant registry 或 BigQuery 前拒絕；回覆 deterministic 計算出的 `requested_days`、active limit，並要求使用者重新選擇期間。
+4. `period_phrase_contract` 使用 active policy timezone（預設 `Asia/Taipei`）的 today 作為 anchor，並至少完整定義下列 phrase families；表中的中英文同義詞都必須有 fixture：
+
+   | Window kind | 中文 phrase family | English phrase family | Normative semantics |
+   | --- | --- | --- | --- |
+   | Single day | 今天、昨天 | `today`、`yesterday` | 對應的單一 calendar day。 |
+   | Rolling days | 過去／最近／近 N 天 | `past`／`recent`／有明確 N 的 `last N days` | 包含 today；`start=today-(N-1 days)`、`end=today`。 |
+   | Previous days | 前 N 天 | `previous N days`、無明確 N 的 `last day` | 不包含 today；`start=today-N days`、`end=yesterday`。 |
+   | Rolling weeks | 過去／最近／近 N 週／周／星期 | `past`／`recent`／有明確 N 的 `last N weeks` | 包含 today 的連續 `7*N` 天，不依 calendar week 切齊。 |
+   | Completed weeks | 前 N 週／周／星期、上週 | `previous N weeks`、無明確 N 的 `last week` | ISO week（週一至週日），不包含本週。 |
+   | Week to date | 本週、這週 | `this week` | 本週一至 today。 |
+   | Rolling months | 過去／最近／近 N 個月、過去／最近／近半年 | `past`／`recent`／有明確 N 的 `last N months` | 將 today 往前移 N 個 calendar months，目標日不存在時 clamp 至月底，再加一天為 start；end 為 today。半年等於 6 個月。 |
+   | Completed months | 前 N 個月、上個月 | `previous N months`、無明確 N 的 `last month` | 完整 calendar months，不包含本月。 |
+   | Month to date | 本月、這個月 | `this month` | 本月第一天至 today。 |
+   | Rolling years | 過去／最近／近 N 年 | `past`／`recent`／有明確 N 的 `last N years` | 將 today 往前移 N 年，`02-29` 在非閏年 clamp 至 `02-28`，再加一天為 start；end 為 today。 |
+   | Completed years | 前 N 年、去年 | `previous N years`、無明確 N 的 `last year` | 完整 calendar years，不包含今年。 |
+   | Year to date | 今年 | `this year` | 當年 `01-01` 至 today。 |
+   | Explicit range | `YYYY-MM-DD` 起訖日期 | `YYYY-MM-DD` start／end dates | 使用明示日期，含起訖日；格式、順序、未來日期及 earliest date 沿用 Phase 4 policy。斜線日期等已被舊 qualifier regex 辨識但不符合 ISO contract 的形式回傳 `invalid_period`，不得靜默正規化。 |
+
+   其他無法唯一判斷 window kind、anchor 或數量的表述一律回傳 `needs_clarification`，不得自行選擇語意或查詢客戶資料。
+5. 更新 server instructions、`get_ga4_capabilities`、`search_ga4_metrics`、`query_ga4` 與 `traffic_summary` 的公開說明：active limit 適用於完整使用者需求；超限時不得拆分、分頁、改用其他 data tool 或自動重試。README 與 consent limitation 必須區分 intent-level best-effort behavior、單次 tool call server enforcement 與 effective scan cost controls。
+6. 新增由 `period_phrase_contract` 驅動的 versioned unit／behavior eval matrix，而不是只累加個別自然語言案例：
+   - 每個 window kind、中文／英文 phrase family、unit alias、數量格式與 `resolved`／`needs_clarification`／`invalid_period` outcome 至少有代表案例。
+   - 所有相對日期 fixtures 注入固定 today 與 policy timezone；覆蓋 today inclusion、ISO week、月底 clamp、跨年、閏年、明確範圍、多區間聯集及語意不明。
+   - 固定 `today=2026-09-14`：「近三個月」與「過去三個月」皆為 `2026-06-15` 至 `2026-09-14`、共 92 天；「過去半年、按月 group」為 `2026-03-15` 至 `2026-09-14`、共 184 天；「過去 13 週」為 `2026-06-16` 至 `2026-09-14`、共 91 天。
+   - 固定 `today=2026-09-16`：「前兩週」為 `2026-08-31` 至 `2026-09-13`、共 14 天。固定 `today=2024-02-29`：「過去一年」為 `2023-03-01` 至 `2024-02-29`、共 366 天；「去年」為 `2023-01-01` 至 `2023-12-31`、共 365 天。
+   - 一般邊界以 `max_date_range_days` 參數化：剛好 `max_date_range_days` 天可繼續，`max_date_range_days+1` 天拒絕；另驗證 `GA4_QUERY_MAX_DAYS=31` 時 31 天可繼續、32 天拒絕，metadata、instructions 與錯誤訊息均顯示 31。
+   - `traffic_summary` 在預設 limit 90、current period 為 `2026-06-17` 至 `2026-09-14` 時，`requested_days=90`，自動 previous period 為 `2026-03-19` 至 `2026-06-16`，`effective_scan_days=180`；intent boundary 應允許，兩段仍須通過 Phase 4 policy。若使用者明確要求這兩段，則 `requested_days=180` 並拒絕。
+   - 「把過去半年拆成三段查」及先收到 `date_range_too_large` 後縮短、拆分或改用另一 data tool 的情境，預期 tenant registry 與 tenant data query 呼叫數皆為零。
+7. 將相同 matrix 的代表案例納入實際 Claude Custom Connector 部署後對話驗收，記錄 normalized period result、tool calls、是否接觸 tenant registry／tenant data，以及最終回答措辭。
 
 #### Out of scope for this PoC phase
 
@@ -352,8 +361,11 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
 - Versioned behavior eval 對明確超過 active `max_date_range_days` 的完整需求回傳限制說明，且預期 tenant registry 與 tenant data query 呼叫數皆為零。
 - 實際 Claude connector 對「過去半年、按月彙總」不拆分查詢，會要求使用者提供不超過 active limit 的新期間。
 - 收到結構化 `date_range_too_large` 後，host 不會自動縮短、拆分或改用另一個 data tool 重試。
+- `period_phrase_contract`、period parser、已辨識 qualifier、公開 metadata、instructions 與 eval inventory 一致；不存在已辨識但沒有 normative semantics 或明確 fallback outcome 的 phrase。
 - 預設及至少一個非預設 `GA4_QUERY_MAX_DAYS` 的邊界行為，與公開 capability metadata、instructions 及錯誤訊息一致。
-- 相對天數、rolling／completed weeks、rolling／completed calendar months、rolling／completed years、語意不明、跨年、閏年及月底 clamp 均有使用固定 today 的明確 fixture 或部署後驗收紀錄。
+- 單一／多個 explicit periods、重疊與相鄰期間、implicit comparison periods 及 `date_scope=all_available_data` 均依標準化 period model 得到一致的 `requested_days` 與 boundary decision。
+- 相對天數、rolling／completed weeks、rolling／completed calendar months、rolling／completed years、to-date、明確日期、語意不明、跨年、閏年及月底 clamp 均有使用固定 today 的明確 fixture 或部署後驗收紀錄。
+- `traffic_summary` 的 intent boundary 只計 current explicit period；自動 previous period 記錄於 `implicit_periods`／`effective_scan_periods`，並繼續受 Phase 4 的 earliest-date 與成本 policy 約束。
 - 文件及 consent page 清楚揭露：單次 tool call 限制由服務端強制，完整使用者需求限制在 PoC 階段依賴 connector instructions 與 host behavior。
 - Phase 4 既有 semantic、traffic summary、REST 與 MCP 日期／成本測試持續通過。
 
