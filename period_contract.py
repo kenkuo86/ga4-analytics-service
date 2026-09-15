@@ -914,17 +914,36 @@ _DATE_SINGLE_PATTERN = re.compile(
     rf"(?<!{_DATE_TOKEN_BOUNDARY}){_ISO_DATE_LIKE}(?!{_DATE_TOKEN_BOUNDARY})"
 )
 _DATE_PERIOD_JOINER_PATTERN = re.compile(
-    rf"[\s,，、;；:：]*(?:{_alternatives(INDEPENDENT_DATE_PERIOD_JOINERS)})?"
-    rf"[\s,，、;；:：]*"
+    rf"\s*(?:"
+    rf"[,，、;；:：]+\s*(?:(?:{_alternatives(INDEPENDENT_DATE_PERIOD_JOINERS)})(?![a-z0-9]))?"
+    rf"|(?:{_alternatives(INDEPENDENT_DATE_PERIOD_JOINERS)})(?![a-z0-9])"
+    rf")(?:\s+.*)?"
 )
-# Keep a second, deliberately permissive candidate pattern so a date with
-# attached digits/ASCII letters, invalid component widths, or missing/non-numeric
-# components (for example 2026-09-01abc, 2026/009/01, or 2026--09-01) are
-# rejected as invalid tokens instead of being silently shortened to a
-# valid-looking date.  The component character class deliberately excludes
-# punctuation so normal sentence punctuation after a valid date remains safe.
+# Keep a second candidate pattern so a date with attached characters, invalid
+# component widths, or missing/non-numeric components (for example
+# 2026-09-01abc, 2026/009/01, or 2026--09-01) is rejected instead of silently
+# shortened.  A candidate must start at a numeric year-shaped token.  Its first
+# two components must then remain date-shaped (numeric or missing), except for a
+# short alphabetic placeholder followed by a numeric day.  This deliberately
+# excludes ordinary identifiers such as ``summer2026-sale-us``,
+# ``2026-q1-sales``, and ``2026-09-sale``.
 _DATE_LIKE_CANDIDATE_PATTERN = re.compile(
-    rf"[A-Za-z0-9_]*\d{{4}}\s*[-/]\s*[A-Za-z0-9_]*\s*[-/]\s*[A-Za-z0-9_]*"
+    r"(?<![A-Za-z0-9_])\d{4,}\s*[-/]\s*(?:"
+    r"(?:\d+[A-Za-z_]*|)\s*[-/]\s*(?:\d+[A-Za-z_]*|)"
+    r"|[A-Za-z_]{1,2}\s*[-/]\s*\d+[A-Za-z_]*"
+    r")(?![A-Za-z0-9_])"
+)
+_DATE_CONTEXT_CANDIDATE_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])from(?![a-z0-9])"
+    rf"|(?<![a-z0-9])(?:date|dates)(?![a-z0-9])(?:\s+(?:is|from))?"
+    rf"|日期(?:\s*(?:是|為|为|[:：]))?"
+    rf"|{_alternatives(('自', '從', '从'))}"
+    rf")\s*(?P<candidate>\d{{4,}}\s*[-/]\s*[A-Za-z0-9_]*\s*[-/]\s*[A-Za-z0-9_]*)"
+)
+_DATE_RANGE_TAIL_CANDIDATE_PATTERN = re.compile(
+    rf"\s*(?:{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})\s*"
+    rf"(?P<candidate>\d{{4,}}\s*[-/]\s*[A-Za-z0-9_]*\s*[-/]\s*[A-Za-z0-9_]*)"
 )
 _FRACTIONAL_QUANTITY = r"[-−－]?\s*\d+[.．]\d+"
 _FRACTIONAL_PERIOD_PATTERN = re.compile(
@@ -989,54 +1008,239 @@ _GROUPING_PATTERN = re.compile(
     rf")",
 )
 
+_FILTER_VALUE_LABELS = (
+    "landing page",
+    "page path",
+    "campaign",
+    "source",
+    "medium",
+    "filter",
+    "page",
+    "活動",
+    "來源",
+    "媒介",
+    "篩選值",
+    "页面",
+    "頁面",
+)
+_FILTER_VALUE_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])(?:for\s+|針對\s*){_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
+    rf"\s*(?:(?:is|equals?)\s+|(?:是|為|为)\s*|[:：=]\s*)?"
+    rf"|(?<![a-z0-9]){_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
+    rf"\s*(?:(?:is|equals?)\s+|(?:是|為|为)\s*|[:：=]\s*)"
+    rf")(?P<value>[^\s,，;；]+)"
+)
+_REVERSED_FILTER_VALUE_PATTERN = re.compile(
+    rf"(?<![a-z0-9])from\s+(?P<value>[^\s,，;；]+)\s+"
+    rf"{_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
+)
+
+
+def _protected_filter_value_spans(text: str) -> list[tuple[int, int]]:
+    """Return explicit GA4 filter values that period parsing must not consume."""
+
+    spans = [match.span("value") for match in _FILTER_VALUE_PATTERN.finditer(text)]
+    spans.extend(
+        match.span("value") for match in _REVERSED_FILTER_VALUE_PATTERN.finditer(text)
+    )
+    return sorted(set(spans))
+
+
+def strip_non_period_filter_values(text: str) -> str:
+    """Remove explicit filter values while retaining their GA4 dimension labels."""
+
+    result = text
+    for start, end in reversed(_protected_filter_value_spans(text)):
+        result = f"{result[:start]} {result[end:]}"
+    return result
+
 
 def _match_is_covered(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
     return any(start <= span[0] and span[1] <= end for start, end in spans)
 
 
-def _is_independent_date_period_joiner(value: str) -> bool:
-    return _DATE_PERIOD_JOINER_PATTERN.fullmatch(value) is not None
+_PERIOD_RANGE_CONNECTOR_PATTERN = re.compile(
+    rf"\s*(?:{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})\s*"
+)
+_PERIOD_RANGE_CONNECTOR_SUFFIX_PATTERN = re.compile(
+    rf"(?<![a-z0-9])(?:{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})(?![a-z0-9])"
+    rf"(?:\s+(?:the\s+)?(?:date|dates))?\s*$"
+)
 
 
-def _unsupported_date_range_matches(
+def _is_independent_period_joiner(value: str) -> bool:
+    return (
+        _DATE_PERIOD_JOINER_PATTERN.fullmatch(value) is not None
+        and _PERIOD_RANGE_CONNECTOR_SUFFIX_PATTERN.search(value) is None
+    )
+
+
+def _is_period_range_connector(value: str) -> bool:
+    return _PERIOD_RANGE_CONNECTOR_PATTERN.fullmatch(value) is not None
+
+
+def _resolved_endpoint_matches(
+    matches: list[PeriodPhraseMatch],
+) -> list[PeriodPhraseMatch]:
+    return sorted(
+        (
+            match
+            for match in matches
+            if match.outcome == "resolved"
+            and match.start_date is not None
+            and match.end_date is not None
+        ),
+        key=lambda match: match.span,
+    )
+
+
+def _malformed_range_tail_matches(
     text: str,
+    matches: list[PeriodPhraseMatch],
     occupied: list[tuple[int, int]],
 ) -> tuple[list[PeriodPhraseMatch], list[tuple[int, int]]]:
-    """Reject unrecognized connective text between adjacent date tokens.
+    """Reject a malformed date following a range connector and parsed atom."""
 
-    A valid range is already represented by one occupied span.  For every
-    remaining adjacent pair, only explicit independent-period joiners may
-    leave the dates available to the single-date parser.  This keeps the
-    fallback structural rather than maintaining a growing list of rejected
-    connector words such as ``until`` or ``before``.
-    """
-
-    matches: list[PeriodPhraseMatch] = []
-    date_matches = list(_DATE_SINGLE_PATTERN.finditer(text))
-    for start_match, end_match in zip(date_matches, date_matches[1:]):
-        span = (start_match.start(), end_match.end())
+    malformed: list[PeriodPhraseMatch] = []
+    for endpoint in _resolved_endpoint_matches(matches):
+        candidate = _DATE_RANGE_TAIL_CANDIDATE_PATTERN.match(text, endpoint.span[1])
+        if candidate is None:
+            continue
+        span = candidate.span("candidate")
         if _match_is_covered(span, occupied):
             continue
-        connector = text[start_match.end() : end_match.start()]
-        if _is_independent_date_period_joiner(connector):
-            continue
         occupied.append(span)
-        phrase = text[span[0] : span[1]].strip()
-        connector_text = connector.strip() or "(無連接文字)"
-        matches.append(
+        malformed.append(
             PeriodPhraseMatch(
-                phrase=phrase,
-                outcome="needs_clarification",
+                phrase=candidate.group("candidate"),
+                outcome="invalid_period",
                 span=span,
+                window_kind="explicit_date",
+                reason_code="invalid_date_format",
+                message="明確日期必須是有效的 YYYY-MM-DD 日期。",
+            )
+        )
+    return malformed, occupied
+
+
+def _normalize_period_connectors(
+    text: str,
+    matches: list[PeriodPhraseMatch],
+    *,
+    policy: Any,
+    anchor: date,
+) -> tuple[list[PeriodInterval], list[PeriodPhraseMatch]]:
+    """Assemble parsed period atoms using one connector grammar.
+
+    Regex rules recognize atoms only.  This pass owns the relationship between
+    every pair of adjacent resolved atoms, regardless of whether an endpoint
+    came from an ISO date, a fixed phrase such as ``today``, or a relative
+    phrase.  Therefore an unknown connector can never degrade a range into a
+    union of unrelated endpoint days.
+    """
+
+    endpoints = _resolved_endpoint_matches(matches)
+    endpoint_ids = {id(match) for match in endpoints}
+    assembled_matches = [match for match in matches if id(match) not in endpoint_ids]
+    assembled_intervals: list[PeriodInterval] = []
+    groups: list[list[PeriodPhraseMatch]] = []
+    for endpoint in endpoints:
+        if not groups:
+            groups.append([endpoint])
+            continue
+        previous = groups[-1][-1]
+        connector = text[previous.span[1] : endpoint.span[0]]
+        if _is_independent_period_joiner(connector):
+            groups.append([endpoint])
+        else:
+            groups[-1].append(endpoint)
+
+    for group in groups:
+        if len(group) == 1:
+            endpoint = group[0]
+            assert endpoint.start_date is not None
+            assert endpoint.end_date is not None
+            assembled_matches.append(endpoint)
+            assembled_intervals.append(
+                PeriodInterval(
+                    phrase=endpoint.phrase,
+                    window_kind=endpoint.window_kind or "explicit_date",
+                    start_date=endpoint.start_date,
+                    end_date=endpoint.end_date,
+                )
+            )
+            continue
+
+        first = group[0]
+        last = group[-1]
+        assert first.start_date is not None
+        assert first.end_date is not None
+        assert last.start_date is not None
+        assert last.end_date is not None
+        combined_span = (first.span[0], last.span[1])
+        combined_phrase = text[combined_span[0] : combined_span[1]].strip()
+        connector = text[first.span[1] : last.span[0]]
+        if (
+            len(group) == 2
+            and _is_period_range_connector(connector)
+            and first.start_date == first.end_date
+            and last.start_date == last.end_date
+        ):
+            start = first.start_date
+            end = last.end_date
+            error = _date_error(start, end, policy=policy, today=anchor)
+            if error is None:
+                assembled_matches.append(
+                    PeriodPhraseMatch(
+                        phrase=combined_phrase,
+                        outcome="resolved",
+                        span=combined_span,
+                        window_kind="explicit_date",
+                        start_date=start,
+                        end_date=end,
+                    )
+                )
+                assembled_intervals.append(
+                    PeriodInterval(
+                        phrase=combined_phrase,
+                        window_kind="explicit_date",
+                        start_date=start,
+                        end_date=end,
+                    )
+                )
+            else:
+                reason_code, message = error
+                assembled_matches.append(
+                    PeriodPhraseMatch(
+                        phrase=combined_phrase,
+                        outcome="invalid_period",
+                        span=combined_span,
+                        window_kind="explicit_date",
+                        start_date=start,
+                        end_date=end,
+                        reason_code=reason_code,
+                        message=message,
+                    )
+                )
+            continue
+
+        connector_text = connector.strip() or "(無連接文字)"
+        assembled_matches.append(
+            PeriodPhraseMatch(
+                phrase=combined_phrase,
+                outcome="needs_clarification",
+                span=combined_span,
                 window_kind="explicit_date",
                 reason_code="unsupported_date_range_connector",
                 message=(
-                    f"日期之間的連接文字 {connector_text!r} 不在支援的日期 contract "
+                    f"期間之間的連接文字 {connector_text!r} 不在支援的日期 contract "
                     "語法中；請使用明確的 range separator，或分開說明各個期間。"
                 ),
             )
         )
-    return matches, occupied
+
+    return assembled_intervals, assembled_matches
 
 
 def _period_residue_matches(
@@ -1166,7 +1370,7 @@ def _explicit_date_matches(
 ) -> tuple[list[PeriodInterval], list[PeriodPhraseMatch], list[tuple[int, int]]]:
     intervals: list[PeriodInterval] = []
     matches: list[PeriodPhraseMatch] = []
-    occupied: list[tuple[int, int]] = []
+    occupied = _protected_filter_value_spans(text)
 
     for match in _DATE_RANGE_PATTERN.finditer(text):
         span = match.span()
@@ -1238,9 +1442,6 @@ def _explicit_date_matches(
             )
         )
 
-    unsupported_matches, occupied = _unsupported_date_range_matches(text, occupied)
-    matches.extend(unsupported_matches)
-
     for match in _DATE_SINGLE_PATTERN.finditer(text):
         span = match.span()
         if _match_is_covered(span, occupied):
@@ -1308,14 +1509,21 @@ def _explicit_date_matches(
             )
         )
 
-    for match in _DATE_LIKE_CANDIDATE_PATTERN.finditer(text):
-        span = match.span()
+    candidate_spans = [
+        (match.span(), match.group(0))
+        for match in _DATE_LIKE_CANDIDATE_PATTERN.finditer(text)
+    ]
+    candidate_spans.extend(
+        (match.span("candidate"), match.group("candidate"))
+        for match in _DATE_CONTEXT_CANDIDATE_PATTERN.finditer(text)
+    )
+    for span, phrase in sorted(candidate_spans):
         if _match_is_covered(span, occupied):
             continue
         occupied.append(span)
         matches.append(
             PeriodPhraseMatch(
-                phrase=match.group(0),
+                phrase=phrase,
                 outcome="invalid_period",
                 span=span,
                 window_kind="explicit_date",
@@ -1332,16 +1540,29 @@ def _explicit_date_matches(
 def explicit_date_range_separator_spans(
     text: str,
 ) -> tuple[tuple[int, int], ...]:
-    """Return separator spans inside contract-recognized date ranges.
+    """Return separator spans inside lexically recognized period ranges.
 
     ``text`` must be the same normalized string whose clauses will be split;
     callers use the coordinates to protect ``to``/equivalent separators from
     generic mixed-request splitting.
     """
 
-    return tuple(
-        match.span("separator") for match in _DATE_RANGE_PATTERN.finditer(text)
-    )
+    atom_spans: list[tuple[int, int]] = [
+        match.span() for match in _DATE_SINGLE_PATTERN.finditer(text)
+    ]
+    atom_spans.extend(match.span() for match in _FIXED_PATTERN.finditer(text))
+    for rule in _RELATIVE_RULES:
+        atom_spans.extend(match.span() for match in rule.pattern.finditer(text))
+    atom_spans.sort()
+
+    separator_spans: list[tuple[int, int]] = []
+    for current, following in zip(atom_spans, atom_spans[1:]):
+        if current[1] > following[0]:
+            continue
+        connector = text[current[1] : following[0]]
+        if _is_period_range_connector(connector):
+            separator_spans.append((current[1], following[0]))
+    return tuple(separator_spans)
 
 
 def _union_days(intervals: tuple[PeriodInterval, ...] | list[PeriodInterval]) -> int:
@@ -1582,6 +1803,13 @@ def resolve_period_intent(
             )
         )
 
+    malformed_tails, occupied = _malformed_range_tail_matches(
+        text,
+        matches,
+        occupied,
+    )
+    matches.extend(malformed_tails)
+
     comparison_modifier = False
     for match in _COMPARISON_PATTERN.finditer(text):
         span = match.span()
@@ -1617,6 +1845,13 @@ def resolve_period_intent(
 
     residue_matches, occupied = _period_residue_matches(text, occupied)
     matches.extend(residue_matches)
+
+    explicit_periods, matches = _normalize_period_connectors(
+        text,
+        matches,
+        policy=policy,
+        anchor=anchor,
+    )
 
     matches.sort(key=lambda item: item.span)
     invalid_matches = [match for match in matches if match.outcome == "invalid_period"]
@@ -1867,7 +2102,7 @@ def period_instruction(policy: Any = None) -> str:
         f"{families}. Fixed previous-period comparison is an implicit traffic-summary "
         "report modifier and does not increase requested_days. Invalid or ambiguous "
         "period phrases require clarification; they must never be silently normalized. "
-        f"Between two explicit date tokens, only these independent-period joiners are "
+        f"Between two recognized period atoms, only these independent-period joiners are "
         f"allowed: {INDEPENDENT_DATE_PERIOD_JOINERS!r}; any other connective text "
         "requires clarification rather than counting the endpoints separately."
     )
@@ -1907,4 +2142,5 @@ __all__ = [
     "period_limit_message",
     "parse_quantity",
     "resolve_period_intent",
+    "strip_non_period_filter_values",
 ]

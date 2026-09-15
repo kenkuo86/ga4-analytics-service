@@ -744,6 +744,66 @@
       "today": "2026-09-14",
       "expected_outcome": "needs_clarification",
       "expected_reason_code": "unsupported_date_range_connector"
+    },
+    {
+      "case_id": "mixed_date_and_fixed_endpoint_range",
+      "phrase": "2026-01-01 through today",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "explicit_date",
+      "expected_start_date": "2026-01-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 257
+    },
+    {
+      "case_id": "year_shaped_filter_is_not_a_date",
+      "phrase": "campaign summer2026-sale-us",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "numeric_filter_slug_is_not_a_date",
+      "phrase": "campaign 2026-09-sale",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "attribution_filter_slug_is_not_a_date",
+      "phrase": "attributed to 2026-09-sale",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "iso_shaped_campaign_value_is_not_a_date",
+      "phrase": "for campaign 2026-09-01",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "slash_shaped_source_value_is_not_a_date",
+      "phrase": "for source 2026/09/01",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "explicit_context_malformed_date",
+      "phrase": "from 2026-abc-01",
+      "today": "2026-09-14",
+      "expected_outcome": "invalid_period",
+      "expected_reason_code": "invalid_date_format"
+    },
+    {
+      "case_id": "chained_range_requires_clarification",
+      "phrase": "yesterday through today through 2026-01-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "unsupported_date_range_connector",
+      "expected_requested_days": 0
     }
   ],
   "behavior_cases": [
@@ -797,6 +857,61 @@
       "expected_reason_code": "traffic_comparison_not_representable",
       "expected_requested_days": 14,
       "expected_explicit_periods": 2,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "mixed_endpoint_range_uses_full_duration",
+      "request": "GA4 sessions from 2026-01-01 through today",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "date_range_too_large",
+      "expected_requested_days": 257,
+      "expected_explicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "punctuation_joiner_preserves_period_union",
+      "request": "GA4 sessions 2026-08-01 to 2026-08-02, and 2026-09-01 to 2026-09-02",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 4,
+      "expected_explicit_periods": 2,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "chained_range_stops_before_tool_choice",
+      "request": "GA4 sessions yesterday through today through 2026-01-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "date_context_malformed_value_stops_tool_choice",
+      "request": "GA4 sessions date is 2026-abc-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "invalid_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "filter_value_does_not_pollute_explicit_periods",
+      "request": "GA4 sessions for campaign 2026-01-01, today",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 1,
+      "expected_explicit_periods": 1,
       "expected_bigquery_calls": 0
     }
   ]

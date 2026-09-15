@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import re
 import unicodedata
 from typing import Any
@@ -15,7 +16,9 @@ from period_contract import (
     period_limit_message,
     PeriodIntent,
     resolve_period_intent,
+    strip_non_period_filter_values,
 )
+from query_policy import QueryPolicy
 from semantic_catalog import SemanticCatalog, semantic_catalog
 
 
@@ -746,7 +749,11 @@ class CapabilityRegistry:
                     period=period_result,
                 )
 
-        unresolved_clause = self._unresolved_mixed_clause(normalized_request)
+        unresolved_clause = self._unresolved_mixed_clause(
+            normalized_request,
+            policy=active_policy,
+            today=today,
+        )
         if unresolved_clause is not None:
             return self._resolution(
                 request=request,
@@ -830,7 +837,13 @@ class CapabilityRegistry:
         result = self._trailing_clause_separator_pattern.sub("", result)
         return result.strip(" ，,。；;")
 
-    def _unresolved_mixed_clause(self, request: str) -> str | None:
+    def _unresolved_mixed_clause(
+        self,
+        request: str,
+        *,
+        policy: QueryPolicy,
+        today: date | None,
+    ) -> str | None:
         """Return the first affirmative mixed clause not covered by GA4 metadata."""
 
         if not (
@@ -851,21 +864,54 @@ class CapabilityRegistry:
                 continue
             if re.search(r"流量摘要|traffic\s+summary", clause):
                 continue
-            candidates = self.catalog.search(clause, limit=10)["metrics"]
+            catalog_clause = self._without_resolved_period_context(
+                clause,
+                policy=policy,
+                today=today,
+            )
+            candidates = self.catalog.search(catalog_clause, limit=10)["metrics"]
             if not candidates or not self._has_complete_catalog_match(
-                clause, candidates
+                catalog_clause, candidates
             ):
                 return clause
         return None
 
+    def _without_resolved_period_context(
+        self,
+        clause: str,
+        *,
+        policy: QueryPolicy,
+        today: date | None,
+    ) -> str:
+        """Remove parser-owned periods before checking metric completeness."""
+
+        normalized = " ".join(self._normalize(clause).split())
+        period_intent = resolve_period_intent(normalized, policy=policy, today=today)
+        result = normalized
+        if period_intent.outcome == "resolved":
+            for match in sorted(
+                period_intent.phrase_matches,
+                key=lambda item: item.span[0],
+                reverse=True,
+            ):
+                start, end = match.span
+                result = f"{result[:start]} {result[end:]}"
+        return strip_non_period_filter_values(result)
+
     def _split_mixed_clauses(self, request: str) -> list[str]:
-        """Split mixed requests without breaking recognized date ranges."""
+        """Split mixed requests without breaking parser/catalog connectors."""
 
         masked_request = request
         replacements: list[tuple[str, str]] = []
-        for index, (start, end) in enumerate(
-            reversed(explicit_date_range_separator_spans(request))
-        ):
+        protected_spans = set(explicit_date_range_separator_spans(request))
+        protected_spans.update(
+            match.span("separator")
+            for match in re.finditer(
+                r"(?<![a-z])attributed\s+(?P<separator>to)(?![a-z])",
+                request,
+            )
+        )
+        for index, (start, end) in enumerate(reversed(sorted(protected_spans))):
             marker = f"\ue000{index}\ue001"
             original_separator = request[start:end]
             masked_request = masked_request[:start] + marker + masked_request[end:]

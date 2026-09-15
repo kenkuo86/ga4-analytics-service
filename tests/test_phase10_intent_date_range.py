@@ -239,6 +239,147 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                 self.assertEqual(result.outcome, "invalid_period")
                 self.assertEqual(result.reason_code, "invalid_date_format")
 
+    def test_year_shaped_filter_identifiers_are_not_dates(self):
+        for filter_value in (
+            "summer2026-sale-us",
+            "2026-sale-us",
+            "2026-q1-sales",
+            "2026-09-sale",
+            "2026-summer-sale-01",
+            "product2026-offer-tw",
+        ):
+            with self.subTest(filter_value=filter_value):
+                result = resolve_period_intent(
+                    f"GA4 sessions for campaign {filter_value}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "none")
+                self.assertEqual(result.requested_days, 0)
+                self.assertFalse(result.phrase_matches)
+
+    def test_explicit_date_context_rejects_nonnumeric_components(self):
+        for request in (
+            "GA4 sessions from 2026-abc-01",
+            "GA4 sessions date is 2026-abc-01",
+            "GA4 sessions today through 2026-abc-01",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "invalid_period")
+                self.assertEqual(result.reason_code, "invalid_date_format")
+
+        filter_result = resolve_period_intent(
+            "GA4 sessions attributed to 2026-09-sale",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(filter_result.outcome, "none")
+
+    def test_explicit_filter_values_are_excluded_before_period_parsing(self):
+        filter_only_requests = (
+            "GA4 sessions for campaign 2026-09-01",
+            "GA4 sessions for campaign is 2026-09-01",
+            "GA4 sessions for campaign equals 2026-09-01",
+            "GA4 sessions for campaign = 2026-09-01",
+            "GA4 sessions campaign: 2026-09-01",
+            "GA4 sessions for source 2026/09/01",
+            "GA4 sessions for source is 2026/09/01",
+            "GA4 sessions from 2026-09-sale campaign",
+            "GA4 sessions 針對活動 2026-09-01",
+        )
+        for request in filter_only_requests:
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+                self.assertEqual(result.outcome, "none")
+                self.assertEqual(result.requested_days, 0)
+
+        filter_and_period = resolve_period_intent(
+            "GA4 sessions for campaign 2026-01-01, today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(filter_and_period.outcome, "resolved")
+        self.assertEqual(filter_and_period.requested_days, 1)
+        self.assertEqual(len(filter_and_period.explicit_periods), 1)
+        self.assertEqual(filter_and_period.explicit_periods[0].phrase, "today")
+
+        metric_and_period = resolve_period_intent(
+            "GA4 landing page today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(metric_and_period.outcome, "resolved")
+        self.assertEqual(metric_and_period.requested_days, 1)
+
+    def test_mixed_period_endpoints_use_the_same_connector_grammar(self):
+        resolved = resolve_period_intent(
+            "GA4 sessions 2026-01-01 through today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        unsupported = resolve_period_intent(
+            "GA4 sessions 2026-01-01 before today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        missing_connector = resolve_period_intent(
+            "GA4 sessions 2026-01-01 today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        non_endpoint_range = resolve_period_intent(
+            "GA4 sessions past 7 days through today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+
+        self.assertEqual(resolved.outcome, "resolved")
+        self.assertEqual(resolved.requested_days, 257)
+        self.assertEqual(len(resolved.explicit_periods), 1)
+        self.assertEqual(
+            resolved.explicit_periods[0].start_date,
+            date(2026, 1, 1),
+        )
+        self.assertEqual(resolved.explicit_periods[0].end_date, date(2026, 9, 14))
+        for result in (unsupported, missing_connector, non_endpoint_range):
+            with self.subTest(result=result):
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(
+                    result.reason_code,
+                    "unsupported_date_range_connector",
+                )
+                self.assertEqual(result.requested_days, 0)
+
+    def test_chained_range_connectors_require_clarification(self):
+        for request in (
+            "GA4 sessions yesterday through today through 2026-01-01",
+            "GA4 sessions 2026-01-01 and through today",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(
+                    result.reason_code,
+                    "unsupported_date_range_connector",
+                )
+                self.assertEqual(result.requested_days, 0)
+
     def test_english_relative_phrases_require_a_leading_boundary(self):
         for phrase in ("compast 7 days", "xrecent 7 days"):
             with self.subTest(phrase=phrase):
@@ -343,6 +484,101 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
         self.assertEqual(result["resolution"], "supported")
         self.assertEqual(result["reason_code"], "ga4_semantic_metric")
         self.assertEqual(result["period"]["requested_days"], 31)
+
+    def test_mixed_endpoint_range_is_not_split_and_uses_full_duration(self):
+        allowed = capability_registry.resolve(
+            "GA4 sessions from 2026-09-01 through today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        rejected = capability_registry.resolve(
+            "GA4 sessions from 2026-01-01 through today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+
+        self.assertEqual(allowed["resolution"], "supported")
+        self.assertEqual(allowed["reason_code"], "ga4_semantic_metric")
+        self.assertEqual(allowed["period"]["requested_days"], 14)
+        self.assertEqual(rejected["resolution"], "needs_clarification")
+        self.assertEqual(rejected["reason_code"], "date_range_too_large")
+        self.assertEqual(rejected["period"]["requested_days"], 257)
+
+    def test_year_shaped_filter_identifier_does_not_block_capability_resolution(self):
+        for request in (
+            "GA4 sessions for campaign summer2026-sale-us",
+            "GA4 sessions attributed to 2026-09-sale",
+            "GA4 sessions for campaign 2026-09-01",
+            "GA4 sessions campaign: 2026-09-01",
+            "GA4 sessions for source 2026/09/01",
+            "GA4 sessions from 2026-09-sale campaign",
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "supported")
+                self.assertEqual(result["reason_code"], "ga4_semantic_metric")
+                self.assertEqual(result["period"]["outcome"], "none")
+
+        malformed = capability_registry.resolve(
+            "GA4 sessions date is 2026-abc-01",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(malformed["resolution"], "needs_clarification")
+        self.assertEqual(malformed["reason_code"], "invalid_period")
+
+        filter_and_period = capability_registry.resolve(
+            "GA4 sessions for campaign 2026-01-01, today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(filter_and_period["resolution"], "supported")
+        self.assertEqual(filter_and_period["period"]["requested_days"], 1)
+
+    def test_punctuation_joiner_and_multi_metric_clauses_keep_periods_independent(self):
+        multiple_ranges = capability_registry.resolve(
+            "GA4 sessions 2026-08-01 to 2026-08-02, and " "2026-09-01 to 2026-09-02",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        multiple_metrics = capability_registry.resolve(
+            "GA4 sessions today and GA4 users yesterday",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        comma_metrics = capability_registry.resolve(
+            "GA4 sessions today, GA4 users yesterday",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        semicolon_metrics = capability_registry.resolve(
+            "GA4 sessions today; GA4 users yesterday",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        attributed_metrics = capability_registry.resolve(
+            "GA4 sessions today and GA4 users attributed to campaign yesterday",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+
+        for result, expected_days in (
+            (multiple_ranges, 4),
+            (multiple_metrics, 2),
+            (comma_metrics, 2),
+            (semicolon_metrics, 2),
+            (attributed_metrics, 2),
+        ):
+            with self.subTest(result=result):
+                self.assertEqual(result["resolution"], "supported")
+                self.assertEqual(result["reason_code"], "ga4_semantic_metric")
+                self.assertEqual(result["period"]["requested_days"], expected_days)
+                self.assertEqual(len(result["period"]["explicit_periods"]), 2)
 
     def test_unsupported_range_connector_requires_period_clarification(self):
         for request in (
