@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.3",
+  "contract_version": "1.0.4",
   "cases": [
     {
       "case_id": "single_day_today",
@@ -685,8 +685,18 @@
       "case_id": "implicit_previous_modifier",
       "phrase": "compare with the previous period",
       "today": "2026-09-14",
+      "include_previous_comparison": true,
       "expected_outcome": "resolved",
       "expected_window_kind": "fixed_previous_comparison",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "unsupported_generic_previous_modifier",
+      "phrase": "compare with the previous period",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_window_kind": "fixed_previous_comparison",
+      "expected_reason_code": "unsupported_comparison_modifier",
       "expected_requested_days": 0
     },
     {
@@ -987,6 +997,28 @@
     {
       "case_id": "date_range_filter_value_stays_outside_period_intent",
       "request": "GA4 sessions for campaign=2026-01-01~2026-09-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "generic_previous_comparison_requires_current_contract",
+      "request": "GA4 sessions compare with the previous period",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "quoted_date_range_filter_stays_outside_period_intent",
+      "request": "GA4 sessions for campaign \"summer sale 2026-01-01 to 2026-09-01\"",
       "today": "2026-09-14",
       "max_days": 90,
       "expected_resolution": "supported",

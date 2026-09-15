@@ -22,7 +22,7 @@ from query_policy import (
 )
 
 
-PERIOD_PHRASE_CONTRACT_VERSION = "1.0.3"
+PERIOD_PHRASE_CONTRACT_VERSION = "1.0.4"
 PERIOD_OUTCOMES = ("resolved", "needs_clarification", "invalid_period")
 
 _CHINESE_DIGIT_VALUES = {
@@ -564,6 +564,10 @@ PERIOD_PHRASE_CONTRACT = {
             "pattern": "punctuation_delimited_relative_period",
             "outcome": "needs_clarification",
         },
+        {
+            "pattern": "comparison_modifier_without_supported_report_contract",
+            "outcome": "needs_clarification",
+        },
     ],
     "explicit_date": {
         "format": "YYYY-MM-DD",
@@ -1058,16 +1062,20 @@ _FILTER_VALUE_LABELS = (
     "页面",
     "頁面",
 )
+_FILTER_VALUE = (
+    r'(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|“[^”\r\n]*”|‘[^’\r\n]*’'
+    r"|「[^」\r\n]*」|『[^』\r\n]*』|[^\s,，;；]+)"
+)
 _FILTER_VALUE_PATTERN = re.compile(
     rf"(?:"
     rf"(?<![a-z0-9])(?:for\s+|針對\s*){_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
     rf"\s*(?:(?:is|equals?)\s+|(?:是|為|为)\s*|[:：=]\s*)?"
     rf"|(?<![a-z0-9]){_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
     rf"\s*(?:(?:is|equals?)\s+|(?:是|為|为)\s*|[:：=]\s*)"
-    rf")(?P<value>[^\s,，;；]+)"
+    rf")(?P<value>{_FILTER_VALUE})"
 )
 _REVERSED_FILTER_VALUE_PATTERN = re.compile(
-    rf"(?<![a-z0-9])from\s+(?P<value>[^\s,，;；]+)\s+"
+    rf"(?<![a-z0-9])from\s+(?P<value>{_FILTER_VALUE})\s+"
     rf"{_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
 )
 
@@ -1884,12 +1892,26 @@ def resolve_period_intent(
             continue
         comparison_modifier = True
         occupied.append(span)
+        outcome = "resolved" if include_previous_comparison else "needs_clarification"
         matches.append(
             PeriodPhraseMatch(
                 phrase=match.group(0).strip(),
-                outcome="resolved",
+                outcome=outcome,
                 span=span,
                 window_kind="fixed_previous_comparison",
+                reason_code=(
+                    None
+                    if include_previous_comparison
+                    else "unsupported_comparison_modifier"
+                ),
+                message=(
+                    None
+                    if include_previous_comparison
+                    else (
+                        "前期比較只由 traffic_summary 的固定 report contract 支援；"
+                        "一般 GA4 metric 查詢請提供明確的 current date range。"
+                    )
+                ),
             )
         )
 
@@ -1979,7 +2001,11 @@ def resolve_period_intent(
     return intent
 
 
-def is_query_context_clause(clause: str) -> bool:
+def is_query_context_clause(
+    clause: str,
+    *,
+    include_previous_comparison: bool = False,
+) -> bool:
     """Return whether a mixed-request clause is period/grouping context."""
 
     normalized = _normalize(clause)
@@ -1987,7 +2013,10 @@ def is_query_context_clause(clause: str) -> bool:
         return False
     if _GROUPING_PATTERN.fullmatch(normalized) is not None:
         return True
-    period_intent = resolve_period_intent(normalized)
+    period_intent = resolve_period_intent(
+        normalized,
+        include_previous_comparison=include_previous_comparison,
+    )
     if period_intent.outcome != "resolved" or not period_intent.phrase_matches:
         return False
 

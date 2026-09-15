@@ -97,6 +97,10 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                     case["phrase"],
                     policy=policy,
                     today=date.fromisoformat(case["today"]),
+                    include_previous_comparison=case.get(
+                        "include_previous_comparison",
+                        False,
+                    ),
                 )
                 self.assertEqual(result.outcome, case["expected_outcome"])
                 self.assertEqual(
@@ -485,6 +489,53 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
         self.assertEqual(filter_and_period.requested_days, 1)
         self.assertEqual(filter_and_period.explicit_periods[0].phrase, "today")
 
+    def test_complete_quoted_filter_values_are_protected(self):
+        for request in (
+            'GA4 sessions for campaign "summer sale 2026-01-01 to 2026-09-01"',
+            "GA4 sessions campaign = 'summer sale 2026-01-01 to 2026-09-01'",
+            'GA4 sessions page path="/summer sale/2026-01-01~2026-09-01"',
+            'GA4 sessions from "summer sale 2026-01-01 to 2026-09-01" campaign',
+            "GA4 sessions 針對活動「夏季 特賣 2026-01-01 至 2026-09-01」",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "none")
+                self.assertEqual(result.requested_days, 0)
+                self.assertFalse(result.phrase_matches)
+
+        filter_and_period = resolve_period_intent(
+            'GA4 sessions for campaign "summer sale 2026-01-01 to 2026-09-01", today',
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(filter_and_period.outcome, "resolved")
+        self.assertEqual(filter_and_period.requested_days, 1)
+
+    def test_previous_period_modifier_requires_traffic_summary_context(self):
+        generic = resolve_period_intent(
+            "GA4 sessions compare with the previous period",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        traffic = resolve_period_intent(
+            "traffic summary 2026-09-01 to 2026-09-07 compare with the previous period",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+            include_previous_comparison=True,
+        )
+
+        self.assertEqual(generic.outcome, "needs_clarification")
+        self.assertEqual(generic.reason_code, "unsupported_comparison_modifier")
+        self.assertEqual(generic.requested_days, 0)
+        self.assertEqual(traffic.outcome, "resolved")
+        self.assertEqual(traffic.requested_days, 7)
+        self.assertEqual(len(traffic.implicit_periods), 1)
+
     def test_range_leading_context_prevents_independent_endpoint_grouping(self):
         for request in (
             "GA4 sessions from 2026-01-01 and 2026-09-01",
@@ -749,6 +800,38 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                 self.assertEqual(result["reason_code"], "ga4_semantic_metric")
                 self.assertEqual(result["period"]["outcome"], "none")
                 self.assertEqual(result["period"]["requested_days"], 0)
+
+    def test_generic_previous_comparison_and_quoted_filters_at_capability_boundary(
+        self,
+    ):
+        for request in (
+            "GA4 sessions compare with the previous period",
+            "GA4 sessions 2026-09-01 to 2026-09-07 與前期比較",
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "ambiguous_period")
+                self.assertEqual(result["next_action"]["type"], "ask_user")
+                self.assertEqual(
+                    result["period"]["reason_code"],
+                    "unsupported_comparison_modifier",
+                )
+
+        quoted_filter = capability_registry.resolve(
+            'GA4 sessions for campaign "summer sale 2026-01-01 to 2026-09-01"',
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(quoted_filter["resolution"], "supported")
+        self.assertEqual(quoted_filter["reason_code"], "ga4_semantic_metric")
+        self.assertEqual(quoted_filter["period"]["outcome"], "none")
+        self.assertEqual(quoted_filter["period"]["requested_days"], 0)
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
         policy = _policy(max_days=31, time_zone="UTC")

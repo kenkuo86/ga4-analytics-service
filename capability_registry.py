@@ -753,6 +753,7 @@ class CapabilityRegistry:
             normalized_request,
             policy=active_policy,
             today=today,
+            include_previous_comparison=is_traffic_request,
         )
         if unresolved_clause is not None:
             return self._resolution(
@@ -843,6 +844,7 @@ class CapabilityRegistry:
         *,
         policy: QueryPolicy,
         today: date | None,
+        include_previous_comparison: bool = False,
     ) -> str | None:
         """Return the first affirmative mixed clause not covered by GA4 metadata."""
 
@@ -860,7 +862,10 @@ class CapabilityRegistry:
             return None
 
         for clause in clauses:
-            if self._is_query_qualifier_clause(clause):
+            if self._is_query_qualifier_clause(
+                clause,
+                include_previous_comparison=include_previous_comparison,
+            ):
                 continue
             if re.search(r"流量摘要|traffic\s+summary", clause):
                 continue
@@ -868,6 +873,7 @@ class CapabilityRegistry:
                 clause,
                 policy=policy,
                 today=today,
+                include_previous_comparison=include_previous_comparison,
             )
             candidates = self.catalog.search(catalog_clause, limit=10)["metrics"]
             if not candidates or not self._has_complete_catalog_match(
@@ -882,11 +888,17 @@ class CapabilityRegistry:
         *,
         policy: QueryPolicy,
         today: date | None,
+        include_previous_comparison: bool = False,
     ) -> str:
         """Remove parser-owned periods before checking metric completeness."""
 
         normalized = " ".join(self._normalize(clause).split())
-        period_intent = resolve_period_intent(normalized, policy=policy, today=today)
+        period_intent = resolve_period_intent(
+            normalized,
+            policy=policy,
+            today=today,
+            include_previous_comparison=include_previous_comparison,
+        )
         result = normalized
         if period_intent.outcome == "resolved":
             for match in sorted(
@@ -1091,13 +1103,21 @@ class CapabilityRegistry:
             chinese_residue = chinese_residue.replace(phrase, "")
         return not chinese_residue
 
-    def _is_query_qualifier_clause(self, clause: str) -> bool:
+    def _is_query_qualifier_clause(
+        self,
+        clause: str,
+        *,
+        include_previous_comparison: bool = False,
+    ) -> bool:
         """Recognize customer and period context, not a second analysis request."""
 
         normalized = clause.strip()
         return bool(
             self._customer_qualifier_pattern.fullmatch(normalized)
-            or is_query_context_clause(normalized)
+            or is_query_context_clause(
+                normalized,
+                include_previous_comparison=include_previous_comparison,
+            )
         )
 
     @staticmethod
