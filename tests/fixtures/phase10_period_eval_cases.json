@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.2",
+  "contract_version": "1.0.3",
   "cases": [
     {
       "case_id": "single_day_today",
@@ -739,6 +739,14 @@
       "expected_reason_code": "ambiguous_period"
     },
     {
+      "case_id": "punctuation_delimited_relative_period",
+      "phrase": "last-180-days",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0
+    },
+    {
       "case_id": "unsupported_completed_quarter",
       "phrase": "last quarter",
       "today": "2026-09-14",
@@ -961,6 +969,28 @@
       "max_days": 90,
       "expected_resolution": "needs_clarification",
       "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "punctuation_period_stops_tool_choice",
+      "request": "GA4 sessions past-180-days",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "date_range_filter_value_stays_outside_period_intent",
+      "request": "GA4 sessions for campaign=2026-01-01~2026-09-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
       "expected_requested_days": 0,
       "expected_explicit_periods": 0,
       "expected_bigquery_calls": 0

@@ -22,7 +22,7 @@ from query_policy import (
 )
 
 
-PERIOD_PHRASE_CONTRACT_VERSION = "1.0.2"
+PERIOD_PHRASE_CONTRACT_VERSION = "1.0.3"
 PERIOD_OUTCOMES = ("resolved", "needs_clarification", "invalid_period")
 
 _CHINESE_DIGIT_VALUES = {
@@ -560,6 +560,10 @@ PERIOD_PHRASE_CONTRACT = {
             "pattern": "unconsumed_period_residue",
             "outcome": "needs_clarification",
         },
+        {
+            "pattern": "punctuation_delimited_relative_period",
+            "outcome": "needs_clarification",
+        },
     ],
     "explicit_date": {
         "format": "YYYY-MM-DD",
@@ -1011,6 +1015,16 @@ _UNSUPPORTED_EN_TO_DATE_PERIODS = (
     "year to date",
 )
 _UNSUPPORTED_ZH_PERIOD_UNITS = ("季", "季度")
+_PERIOD_PUNCTUATION_SEPARATOR = r"(?:(?:[^\w\s]|_)+)"
+_PUNCTUATED_RELATIVE_PERIOD_PATTERN = re.compile(
+    rf"(?<![a-z0-9])"
+    rf"(?:{_alternatives(_ALL_RELATIVE_EN_PREFIXES + (_THIS_EN_PREFIX,))})"
+    rf"\s*{_PERIOD_PUNCTUATION_SEPARATOR}\s*"
+    rf"(?:\d+|{_ENGLISH_QUANTITY})"
+    rf"\s*{_PERIOD_PUNCTUATION_SEPARATOR}\s*"
+    rf"[a-z]+(?:\s*{_PERIOD_PUNCTUATION_SEPARATOR}\s*[a-z]+)*"
+    rf"(?![a-z0-9])"
+)
 _UNSUPPORTED_PERIOD_RESIDUE_PATTERN = re.compile(
     rf"(?:"
     rf"(?<![a-z0-9])(?:{_alternatives(_ALL_RELATIVE_EN_PREFIXES + (_THIS_EN_PREFIX,))})"
@@ -1292,10 +1306,11 @@ def _period_residue_matches(
     """Return period-shaped fragments left unconsumed by the contract parser."""
 
     matches: list[PeriodPhraseMatch] = []
-    for pattern in (
-        _PERIOD_QUANTITY_RESIDUE_PATTERN,
-        _RELATIVE_QUANTITY_RESIDUE_PATTERN,
-        _UNSUPPORTED_PERIOD_RESIDUE_PATTERN,
+    for pattern, force_clarification in (
+        (_PUNCTUATED_RELATIVE_PERIOD_PATTERN, True),
+        (_PERIOD_QUANTITY_RESIDUE_PATTERN, False),
+        (_RELATIVE_QUANTITY_RESIDUE_PATTERN, False),
+        (_UNSUPPORTED_PERIOD_RESIDUE_PATTERN, False),
     ):
         for match in pattern.finditer(text):
             span = match.span()
@@ -1303,7 +1318,14 @@ def _period_residue_matches(
                 continue
             phrase = match.group(0).strip()
             occupied.append(span)
-            outcome, reason_code, message = _invalid_candidate_outcome(phrase)
+            if force_clarification:
+                outcome, reason_code, message = (
+                    "needs_clarification",
+                    "ambiguous_period",
+                    "期間詞使用未支援的標點分隔格式，請提供 contract 支援的期間語法。",
+                )
+            else:
+                outcome, reason_code, message = _invalid_candidate_outcome(phrase)
             matches.append(
                 PeriodPhraseMatch(
                     phrase=phrase,
@@ -1417,6 +1439,8 @@ def _explicit_date_matches(
 
     for match in _DATE_RANGE_PATTERN.finditer(text):
         span = match.span()
+        if _match_is_covered(span, occupied):
+            continue
         start_text = match.group("start")
         end_text = match.group("end")
         phrase = match.group(0).strip()

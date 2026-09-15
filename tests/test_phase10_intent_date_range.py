@@ -430,6 +430,61 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                 self.assertEqual(result.reason_code, "ambiguous_period")
                 self.assertEqual(result.requested_days, 0)
 
+    def test_punctuation_delimited_relative_period_requires_clarification(self):
+        for phrase in (
+            "last-180-days",
+            "past-180-days",
+            "recent_13_weeks",
+            "previous/4/months",
+            "past.180.days",
+            "last:3:fortnights",
+            "recent-2-business-days",
+        ):
+            with self.subTest(phrase=phrase):
+                result = resolve_period_intent(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(result.reason_code, "ambiguous_period")
+                self.assertEqual(result.requested_days, 0)
+
+        protected = resolve_period_intent(
+            "GA4 sessions for campaign=last-180-days",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(protected.outcome, "none")
+        self.assertFalse(protected.phrase_matches)
+
+    def test_date_range_shaped_filter_values_are_protected(self):
+        for request in (
+            "GA4 sessions for campaign=2026-01-01~2026-09-01",
+            "GA4 sessions page path=/2026-01-01~2026-09-01",
+            "GA4 sessions from 2026-01-01~2026-09-01 campaign",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "none")
+                self.assertEqual(result.requested_days, 0)
+                self.assertFalse(result.phrase_matches)
+
+        filter_and_period = resolve_period_intent(
+            "GA4 sessions for campaign=2026-01-01~2026-09-01, today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(filter_and_period.outcome, "resolved")
+        self.assertEqual(filter_and_period.requested_days, 1)
+        self.assertEqual(filter_and_period.explicit_periods[0].phrase, "today")
+
     def test_range_leading_context_prevents_independent_endpoint_grouping(self):
         for request in (
             "GA4 sessions from 2026-01-01 and 2026-09-01",
@@ -660,6 +715,39 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                 self.assertEqual(result["reason_code"], "ambiguous_period")
                 self.assertEqual(result["next_action"]["type"], "ask_user")
                 self.assertEqual(result["period"]["reason_code"], period_reason)
+                self.assertEqual(result["period"]["requested_days"], 0)
+
+    def test_punctuation_period_and_filter_range_findings_at_capability_boundary(self):
+        for request in (
+            "GA4 sessions last-180-days",
+            "GA4 sessions past-180-days",
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "ambiguous_period")
+                self.assertEqual(result["next_action"]["type"], "ask_user")
+                self.assertEqual(result["period"]["requested_days"], 0)
+
+        for request in (
+            "GA4 sessions for campaign=2026-01-01~2026-09-01",
+            "GA4 sessions page path=/2026-01-01~2026-09-01",
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "supported")
+                self.assertEqual(result["reason_code"], "ga4_semantic_metric")
+                self.assertEqual(result["period"]["outcome"], "none")
                 self.assertEqual(result["period"]["requested_days"], 0)
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
