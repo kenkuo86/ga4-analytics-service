@@ -22,7 +22,7 @@ from query_policy import (
 )
 
 
-PERIOD_PHRASE_CONTRACT_VERSION = "1.0.1"
+PERIOD_PHRASE_CONTRACT_VERSION = "1.0.2"
 PERIOD_OUTCOMES = ("resolved", "needs_clarification", "invalid_period")
 
 _CHINESE_DIGIT_VALUES = {
@@ -999,6 +999,27 @@ _RELATIVE_QUANTITY_RESIDUE_PATTERN = re.compile(
     rf"|(?<![a-z0-9])(?:{_alternatives(_CANDIDATE_ZH_PREFIXES)})"
     rf"\s*{_PERIOD_QUANTITY}(?![a-z0-9])"
 )
+# Known calendar units and to-date forms outside the supported contract still
+# carry period intent even when no quantity is present.  Keep this vocabulary
+# explicit so ordinary qualifiers such as ``last campaign`` are not mistaken
+# for dates, while unsupported requests can never degrade to ``outcome=none``.
+_UNSUPPORTED_EN_PERIOD_UNITS = ("quarter", "quarters", "fortnight", "fortnights")
+_UNSUPPORTED_EN_TO_DATE_PERIODS = (
+    "week to date",
+    "month to date",
+    "quarter to date",
+    "year to date",
+)
+_UNSUPPORTED_ZH_PERIOD_UNITS = ("季", "季度")
+_UNSUPPORTED_PERIOD_RESIDUE_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])(?:{_alternatives(_ALL_RELATIVE_EN_PREFIXES + (_THIS_EN_PREFIX,))})"
+    rf"\s+(?:{_alternatives(_UNSUPPORTED_EN_PERIOD_UNITS)})(?![a-z0-9])"
+    rf"|(?<![a-z0-9])(?:{_alternatives(_UNSUPPORTED_EN_TO_DATE_PERIODS)})(?![a-z0-9])"
+    rf"|(?:{_alternatives(_CANDIDATE_ZH_PREFIXES)})\s*"
+    rf"(?:{_alternatives(_UNSUPPORTED_ZH_PERIOD_UNITS)})"
+    rf")"
+)
 
 _GROUPING_PATTERN = re.compile(
     rf"(?:"
@@ -1067,6 +1088,12 @@ _PERIOD_RANGE_CONNECTOR_SUFFIX_PATTERN = re.compile(
     rf"(?<![a-z0-9])(?:{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})(?![a-z0-9])"
     rf"(?:\s+(?:the\s+)?(?:date|dates))?\s*$"
 )
+_PERIOD_RANGE_LEADING_CONTEXT_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])(?:from|between)(?![a-z0-9])"
+    rf"|{_alternatives(('自', '從', '从'))}"
+    rf")\s*$"
+)
 
 
 def _is_independent_period_joiner(value: str) -> bool:
@@ -1078,6 +1105,18 @@ def _is_independent_period_joiner(value: str) -> bool:
 
 def _is_period_range_connector(value: str) -> bool:
     return _PERIOD_RANGE_CONNECTOR_PATTERN.fullmatch(value) is not None
+
+
+def _has_period_range_leading_context(
+    text: str,
+    endpoint: PeriodPhraseMatch,
+) -> bool:
+    """Return whether an endpoint is introduced as the start of a range."""
+
+    return (
+        _PERIOD_RANGE_LEADING_CONTEXT_PATTERN.search(text[: endpoint.span[0]])
+        is not None
+    )
 
 
 def _resolved_endpoint_matches(
@@ -1151,7 +1190,10 @@ def _normalize_period_connectors(
             continue
         previous = groups[-1][-1]
         connector = text[previous.span[1] : endpoint.span[0]]
-        if _is_independent_period_joiner(connector):
+        if _is_independent_period_joiner(connector) and not (
+            len(groups[-1]) == 1
+            and _has_period_range_leading_context(text, groups[-1][0])
+        ):
             groups.append([endpoint])
         else:
             groups[-1].append(endpoint)
@@ -1253,6 +1295,7 @@ def _period_residue_matches(
     for pattern in (
         _PERIOD_QUANTITY_RESIDUE_PATTERN,
         _RELATIVE_QUANTITY_RESIDUE_PATTERN,
+        _UNSUPPORTED_PERIOD_RESIDUE_PATTERN,
     ):
         for match in pattern.finditer(text):
             span = match.span()

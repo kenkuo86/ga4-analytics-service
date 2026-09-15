@@ -112,7 +112,7 @@ connector eval 驗收。
 
 `period_contract.py` 是相對期間 vocabulary、解析規則、capability metadata、server
 instructions 與 Phase 10 eval fixture 的 versioned 單一來源，目前 contract version 為
-`1.0.0`。它會將使用者需求標準化為 `explicit_periods`、`requested_days` 與
+`1.0.2`。它會將使用者需求標準化為 `explicit_periods`、`requested_days` 與
 `implicit_periods`：`requested_days` 是所有 explicit periods 聯集中的不重複 calendar
 days，因此重疊、相鄰、拆分的區段以及 `group by month` 都不能繞過限制。相對期間以
 `GA4_QUERY_TIME_ZONE` 的 today 為 anchor，無法唯一判斷的數量或 window kind 會要求釐清，

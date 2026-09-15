@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.1",
+  "contract_version": "1.0.2",
   "cases": [
     {
       "case_id": "single_day_today",
@@ -732,6 +732,27 @@
       "expected_reason_code": "ambiguous_period"
     },
     {
+      "case_id": "unknown_relative_unit_without_quantity",
+      "phrase": "past fortnight",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unsupported_completed_quarter",
+      "phrase": "last quarter",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unsupported_year_to_date_alias",
+      "phrase": "year to date",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
       "case_id": "period_quantity_without_prefix",
       "phrase": "7 days",
       "today": "2026-09-14",
@@ -800,6 +821,14 @@
     {
       "case_id": "chained_range_requires_clarification",
       "phrase": "yesterday through today through 2026-01-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "unsupported_date_range_connector",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "range_prefix_with_independent_joiner_requires_clarification",
+      "phrase": "from 2026-01-01 and 2026-09-01",
       "today": "2026-09-14",
       "expected_outcome": "needs_clarification",
       "expected_reason_code": "unsupported_date_range_connector",
@@ -912,6 +941,28 @@
       "expected_reason_code": "ga4_semantic_metric",
       "expected_requested_days": 1,
       "expected_explicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "unsupported_period_unit_stops_tool_choice",
+      "request": "GA4 sessions last quarter",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "range_prefix_prevents_split_period_bypass",
+      "request": "GA4 sessions from 2026-01-01 and 2026-09-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
       "expected_bigquery_calls": 0
     }
   ]

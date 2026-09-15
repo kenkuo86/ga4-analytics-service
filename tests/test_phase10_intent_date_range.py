@@ -411,6 +411,45 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                 self.assertEqual(result.reason_code, "ambiguous_period")
                 self.assertEqual(result.requested_days, 0)
 
+    def test_unsupported_period_units_without_quantity_require_clarification(self):
+        for phrase in (
+            "last quarter",
+            "past fortnight",
+            "year to date",
+            "previous quarter",
+            "本季度",
+        ):
+            with self.subTest(phrase=phrase):
+                result = resolve_period_intent(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(result.reason_code, "ambiguous_period")
+                self.assertEqual(result.requested_days, 0)
+
+    def test_range_leading_context_prevents_independent_endpoint_grouping(self):
+        for request in (
+            "GA4 sessions from 2026-01-01 and 2026-09-01",
+            "GA4 sessions between 2026-01-01 and 2026-09-01",
+            "GA4 sessions 從 2026-01-01 和 2026-09-01",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(
+                    result.reason_code,
+                    "unsupported_date_range_connector",
+                )
+                self.assertEqual(result.requested_days, 0)
+
 
 class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
     def test_versioned_behavior_matrix_keeps_data_calls_at_zero(self):
@@ -598,6 +637,29 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                     result["period"]["reason_code"],
                     "unsupported_date_range_connector",
                 )
+                self.assertEqual(result["period"]["requested_days"], 0)
+
+    def test_period_residue_and_range_prefix_findings_block_capability(self):
+        for request, period_reason in (
+            ("GA4 sessions last quarter", "ambiguous_period"),
+            ("GA4 sessions past fortnight", "ambiguous_period"),
+            ("GA4 sessions year to date", "ambiguous_period"),
+            (
+                "GA4 sessions from 2026-01-01 and 2026-09-01",
+                "unsupported_date_range_connector",
+            ),
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "ambiguous_period")
+                self.assertEqual(result["next_action"]["type"], "ask_user")
+                self.assertEqual(result["period"]["reason_code"], period_reason)
                 self.assertEqual(result["period"]["requested_days"], 0)
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
