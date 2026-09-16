@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.5",
+  "contract_version": "1.0.6",
   "cases": [
     {
       "case_id": "single_day_today",
@@ -912,6 +912,39 @@
       "expected_bigquery_calls": 0
     },
     {
+      "case_id": "unconsumed_period_residue_does_not_shorten_valid_prefix",
+      "request": "GA4 sessions today, 180-day trend",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "truncated_date_stops_tool_choice",
+      "request": "GA4 sessions date 2026-09",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "invalid_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "terminal_range_connector_stops_tool_choice",
+      "request": "GA4 sessions 2026-09-01 -",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
       "case_id": "traffic_custom_comparison_is_not_representable",
       "request": "traffic summary, 2026-08-01 to 2026-08-07 and 2026-07-01 to 2026-07-07",
       "today": "2026-09-14",
@@ -969,6 +1002,17 @@
     {
       "case_id": "filter_value_does_not_pollute_explicit_periods",
       "request": "GA4 sessions for campaign 2026-01-01, today",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 1,
+      "expected_explicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "protected_partial_identifier_plus_period",
+      "request": "GA4 sessions for campaign 2026-09, today",
       "today": "2026-09-14",
       "max_days": 90,
       "expected_resolution": "supported",

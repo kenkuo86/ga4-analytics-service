@@ -22,7 +22,7 @@ from query_policy import (
 )
 
 
-PERIOD_PHRASE_CONTRACT_VERSION = "1.0.5"
+PERIOD_PHRASE_CONTRACT_VERSION = "1.0.6"
 PERIOD_OUTCOMES = ("resolved", "needs_clarification", "invalid_period")
 
 _CHINESE_DIGIT_VALUES = {
@@ -961,6 +961,22 @@ _DATE_RANGE_TAIL_CANDIDATE_PATTERN = re.compile(
     rf"\s*(?:{_alternatives(EXPLICIT_DATE_RANGE_SEPARATORS)})\s*"
     rf"(?P<candidate>\d{{4,}}\s*[-/]\s*[A-Za-z0-9_]*\s*[-/]\s*[A-Za-z0-9_]*)"
 )
+# A complete ISO date or an already malformed three-component token is
+# handled by the parser above.  These two patterns cover the remaining
+# date-shaped signals that must not disappear when recognition stops early,
+# such as ``2026-09`` or ``date 2026``.
+_DATE_PARTIAL_CANDIDATE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])\d{4,}\s*[-/]\s*\d{1,2}" r"(?!\s*[-/]|[A-Za-z0-9_])"
+)
+_DATE_CONTEXT_PARTIAL_CANDIDATE_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])from(?![a-z0-9])"
+    rf"|(?<![a-z0-9])(?:date|dates)(?![a-z0-9])(?:\s+(?:is|from))?"
+    rf"|日期(?:\s*(?:是|為|为|[:：]))?"
+    rf"|{_alternatives(('自', '從', '从'))}"
+    rf")\s*(?P<candidate>\d{{4,}}(?:\s*[-/]\s*\d{{1,2}})?)"
+    r"(?!\s*[-/]|[A-Za-z0-9_])"
+)
 _FRACTIONAL_QUANTITY = r"[-−－]?\s*\d+[.．]\d+"
 _FRACTIONAL_PERIOD_PATTERN = re.compile(
     rf"(?:"
@@ -1208,6 +1224,41 @@ _DANGLING_RANGE_TRAILING_SEPARATORS = tuple(
 )
 _PERIOD_RANGE_TRAILING_CONTEXT_PATTERN = re.compile(
     rf"^\s*(?:{_alternatives(_DANGLING_RANGE_TRAILING_SEPARATORS)})(?![a-z0-9])"
+)
+_PERIOD_RANGE_WORD_CONNECTORS = tuple(
+    separator
+    for separator in EXPLICIT_DATE_RANGE_SEPARATORS
+    if separator in {"to", "through", "到", "至"}
+)
+_PERIOD_RANGE_PUNCTUATION_CONNECTORS = tuple(
+    separator
+    for separator in EXPLICIT_DATE_RANGE_SEPARATORS
+    if separator not in _PERIOD_RANGE_WORD_CONNECTORS
+)
+_PERIOD_RANGE_CONNECTOR_SIGNAL_PATTERN = re.compile(
+    rf"(?<![a-z0-9])(?:{_alternatives(_PERIOD_RANGE_WORD_CONNECTORS)})(?![a-z0-9])"
+    rf"|{_alternatives(_PERIOD_RANGE_PUNCTUATION_CONNECTORS)}"
+)
+# These are known date-range words that are intentionally outside the
+# supported contract.  They are only treated as connectors when they are
+# structurally adjacent to a period signal; ordinary prose is left alone.
+_UNSUPPORTED_PERIOD_RANGE_CONNECTORS = (
+    "until",
+    "before",
+    "after",
+    "since",
+    "截至",
+    "之前",
+    "以前",
+    "之後",
+    "以後",
+)
+_UNSUPPORTED_PERIOD_RANGE_CONNECTOR_PATTERN = re.compile(
+    rf"(?<![a-z0-9])(?:{_alternatives(_UNSUPPORTED_PERIOD_RANGE_CONNECTORS)})(?![a-z0-9])"
+)
+_PERIOD_RANGE_PREFIX_SIGNAL_PATTERN = re.compile(
+    rf"(?<![a-z0-9])(?:from|between)(?![a-z0-9])"
+    rf"|{_alternatives(('自', '從', '从'))}"
 )
 
 
@@ -1888,6 +1939,359 @@ def _implicit_previous_period(
     )
 
 
+class PeriodSafetyAudit:
+    """Fail closed when period-shaped input escaped atom recognition.
+
+    This is a postcondition check, not another period parser.  It uses the
+    spans already produced by protected-value masking and atom recognition,
+    then checks the small set of contract-owned date/period shapes that can be
+    left behind by a truncated or malformed token.  Range checks use the
+    resolved atoms and those same residual shapes as endpoints.
+    """
+
+    def __init__(
+        self,
+        *,
+        text: str,
+        protected_spans: tuple[tuple[int, int], ...] | list[tuple[int, int]],
+        recognized_spans: tuple[tuple[int, int], ...] | list[tuple[int, int]],
+        phrase_matches: tuple[PeriodPhraseMatch, ...] | list[PeriodPhraseMatch],
+    ):
+        self.text = text
+        self.protected_spans = tuple(protected_spans)
+        self.recognized_spans = tuple(recognized_spans)
+        self.phrase_matches = tuple(phrase_matches)
+
+    @staticmethod
+    def _covered(
+        span: tuple[int, int],
+        spans: tuple[tuple[int, int], ...] | list[tuple[int, int]],
+    ) -> bool:
+        return any(start <= span[0] and span[1] <= end for start, end in spans)
+
+    @staticmethod
+    def _overlaps(
+        first: tuple[int, int],
+        second: tuple[int, int],
+    ) -> bool:
+        return first[0] < second[1] and second[0] < first[1]
+
+    def _explained_spans(self) -> tuple[tuple[int, int], ...]:
+        return tuple(
+            {
+                *self.protected_spans,
+                *self.recognized_spans,
+                *(match.span for match in self.phrase_matches),
+            }
+        )
+
+    def _unexplained_period_signals(
+        self,
+        explained_spans: tuple[tuple[int, int], ...],
+    ) -> list[PeriodPhraseMatch]:
+        # The ordinary residue pass already owns the contract's quantity,
+        # unit, punctuation, and unsupported-vocabulary signals.  Reuse it
+        # here as the postcondition instead of maintaining a second copy of
+        # those rules.
+        probe_spans = list(explained_spans)
+        residue_matches, _ = _period_residue_matches(self.text, probe_spans)
+        raw_matches = list(residue_matches)
+
+        # Recognition intentionally accepts only complete ISO dates.  The
+        # partial forms below are the one date-shaped gap that can remain
+        # after the normal candidate pass (for example ``date 2026-09``).
+        for pattern in (
+            _DATE_CONTEXT_PARTIAL_CANDIDATE_PATTERN,
+            _DATE_PARTIAL_CANDIDATE_PATTERN,
+        ):
+            for match in pattern.finditer(self.text):
+                span = match.span()
+                candidate_span = (
+                    match.span("candidate")
+                    if "candidate" in match.groupdict()
+                    else span
+                )
+                if self._covered(span, explained_spans) or self._covered(
+                    candidate_span,
+                    explained_spans,
+                ):
+                    continue
+                raw_matches.append(
+                    PeriodPhraseMatch(
+                        phrase=match.group(0).strip(),
+                        outcome="invalid_period",
+                        span=span,
+                        window_kind="explicit_date",
+                        reason_code="invalid_date_format",
+                        message=(
+                            "明確日期 token 必須完整使用 YYYY-MM-DD 格式，"
+                            "不得省略日期元件或附帶額外字元。"
+                        ),
+                    )
+                )
+
+        # Prefer the most specific/complete shape when patterns overlap, for
+        # example the contextual ``date 2026-09`` over its numeric suffix.
+        accepted: list[PeriodPhraseMatch] = []
+        for candidate in sorted(
+            raw_matches,
+            key=lambda item: (item.span[0], -(item.span[1] - item.span[0])),
+        ):
+            if any(
+                self._covered(candidate.span, (existing.span,)) for existing in accepted
+            ):
+                continue
+            accepted.append(candidate)
+        return accepted
+
+    def _resolved_endpoints(self) -> list[PeriodPhraseMatch]:
+        return _resolved_endpoint_matches(list(self.phrase_matches))
+
+    @staticmethod
+    def _is_complete_resolved_range(match: PeriodPhraseMatch) -> bool:
+        if match.outcome != "resolved":
+            return False
+        phrase = match.phrase.strip()
+        if _DATE_RANGE_PATTERN.fullmatch(phrase) is not None:
+            return True
+        return (
+            re.search(
+                r"(?<![a-z0-9])(?:to|through)(?![a-z0-9])|[~～－–—]",
+                phrase,
+            )
+            is not None
+        )
+
+    def _adjacent_before(
+        self,
+        position: int,
+        candidates: list[PeriodPhraseMatch],
+    ) -> PeriodPhraseMatch | None:
+        for candidate in sorted(
+            candidates, key=lambda item: item.span[1], reverse=True
+        ):
+            if (
+                candidate.span[1] <= position
+                and not self.text[candidate.span[1] : position].strip()
+            ):
+                return candidate
+        return None
+
+    def _adjacent_after(
+        self,
+        position: int,
+        candidates: list[PeriodPhraseMatch],
+    ) -> PeriodPhraseMatch | None:
+        for candidate in sorted(candidates, key=lambda item: item.span[0]):
+            if (
+                candidate.span[0] >= position
+                and not self.text[position : candidate.span[0]].strip()
+            ):
+                return candidate
+        return None
+
+    def _finding(
+        self,
+        *,
+        span: tuple[int, int],
+        reason_code: str,
+        message: str,
+    ) -> PeriodPhraseMatch:
+        return PeriodPhraseMatch(
+            phrase=self.text[span[0] : span[1]].strip(),
+            outcome="needs_clarification",
+            span=span,
+            window_kind="explicit_date",
+            reason_code=reason_code,
+            message=message,
+        )
+
+    def _is_filter_attribution_connector(self, span: tuple[int, int]) -> bool:
+        connector = self.text[span[0] : span[1]].casefold()
+        if connector != "to":
+            return False
+        return (
+            re.search(r"(?<![a-z0-9])attributed\s+$", self.text[: span[0]]) is not None
+        )
+
+    def _range_finding_for_connector(
+        self,
+        connector_span: tuple[int, int],
+        *,
+        connector_kind: str,
+        explained_spans: tuple[tuple[int, int], ...],
+        signal_matches: list[PeriodPhraseMatch],
+    ) -> PeriodPhraseMatch | None:
+        if self._covered(connector_span, explained_spans):
+            return None
+        if connector_kind == "supported" and self._covered(
+            connector_span,
+            tuple(match.span for match in signal_matches),
+        ):
+            # A dash inside ``180-day`` or a truncated date is part of the
+            # signal itself, not a range connector.
+            return None
+        if self._is_filter_attribution_connector(connector_span):
+            return None
+
+        resolved = self._resolved_endpoints()
+        period_candidates = [*resolved, *signal_matches]
+        left = self._adjacent_before(connector_span[0], period_candidates)
+        right = self._adjacent_after(connector_span[1], period_candidates)
+        connector_text = self.text[connector_span[0] : connector_span[1]].strip()
+        is_dash_like = connector_text in {"-", "－", "–", "—"}
+        unsupported = connector_kind == "unsupported"
+        reason_code = (
+            "unsupported_date_range_connector"
+            if unsupported
+            else "incomplete_date_range"
+        )
+        if left is not None and right is not None:
+            start = min(left.span[0], connector_span[0])
+            end = max(right.span[1], connector_span[1])
+            message = (
+                f"期間之間的連接文字 {connector_text!r} 不在支援的日期 contract "
+                "語法中；請提供兩個完整 endpoint。"
+                if unsupported
+                else "日期範圍的兩側都必須是完整 endpoint；請提供完整的起訖日期。"
+            )
+            return self._finding(
+                span=(start, end),
+                reason_code=reason_code,
+                message=message,
+            )
+
+        if left is not None:
+            suffix = self.text[connector_span[1] :].strip()
+            if (
+                is_dash_like
+                and suffix
+                and _QUERY_GROUPING_SUFFIX_PATTERN.fullmatch(suffix)
+            ):
+                return None
+            start = left.span[0]
+            end = connector_span[1]
+            return self._finding(
+                span=(start, end),
+                reason_code=reason_code,
+                message=(
+                    f"期間之間的連接文字 {connector_text!r} 不在支援的日期 contract "
+                    "語法中；請提供兩個完整 endpoint。"
+                    if unsupported
+                    else "日期範圍缺少終點；請提供完整的起訖日期。"
+                ),
+            )
+
+        if right is not None:
+            return self._finding(
+                span=(connector_span[0], right.span[1]),
+                reason_code=reason_code,
+                message=(
+                    f"期間之間的連接文字 {connector_text!r} 不在支援的日期 contract "
+                    "語法中；請提供兩個完整 endpoint。"
+                    if unsupported
+                    else "日期範圍缺少起點；請提供完整的起訖日期。"
+                ),
+            )
+
+        # A terminal range token is itself an unambiguous incomplete signal.
+        # Internal punctuation remains ignored unless it is adjacent to a
+        # recognized period atom or residual period shape.
+        if not self.text[connector_span[1] :].strip():
+            return self._finding(
+                span=connector_span,
+                reason_code=reason_code,
+                message="日期範圍 connector 沒有連接完整 endpoint；請提供完整的起訖日期。",
+            )
+        return None
+
+    def _range_findings(
+        self,
+        *,
+        explained_spans: tuple[tuple[int, int], ...],
+        signal_matches: list[PeriodPhraseMatch],
+    ) -> list[PeriodPhraseMatch]:
+        findings: list[PeriodPhraseMatch] = []
+        for pattern, connector_kind in (
+            (_PERIOD_RANGE_CONNECTOR_SIGNAL_PATTERN, "supported"),
+            (_UNSUPPORTED_PERIOD_RANGE_CONNECTOR_PATTERN, "unsupported"),
+        ):
+            for match in pattern.finditer(self.text):
+                finding = self._range_finding_for_connector(
+                    match.span(),
+                    connector_kind=connector_kind,
+                    explained_spans=explained_spans,
+                    signal_matches=signal_matches,
+                )
+                if finding is not None:
+                    findings.append(finding)
+
+        # Range prefixes (``from``/``between`` and their supported Chinese
+        # forms) are context, not endpoints.  If one survives recognition it
+        # must still have a complete endpoint pair.
+        period_candidates = [*self._resolved_endpoints(), *signal_matches]
+        for match in _PERIOD_RANGE_PREFIX_SIGNAL_PATTERN.finditer(self.text):
+            prefix_span = match.span()
+            if self._covered(prefix_span, explained_spans):
+                continue
+            right = self._adjacent_after(prefix_span[1], period_candidates)
+            overlapping_right = next(
+                (
+                    candidate
+                    for candidate in period_candidates
+                    if candidate.span[0] <= prefix_span[1] < candidate.span[1]
+                ),
+                None,
+            )
+            right = overlapping_right or right
+            if right is not None:
+                if self._is_complete_resolved_range(right):
+                    continue
+                findings.append(
+                    self._finding(
+                        span=(prefix_span[0], right.span[1]),
+                        reason_code="incomplete_date_range",
+                        message="日期範圍缺少另一個 endpoint；請提供完整的起訖日期。",
+                    )
+                )
+            elif not self.text[prefix_span[1] :].strip():
+                findings.append(
+                    self._finding(
+                        span=prefix_span,
+                        reason_code="incomplete_date_range",
+                        message="日期範圍 prefix 沒有完整 endpoint；請提供完整的起訖日期。",
+                    )
+                )
+        return findings
+
+    def run(self) -> tuple[PeriodPhraseMatch, ...]:
+        explained_spans = self._explained_spans()
+        signal_matches = self._unexplained_period_signals(explained_spans)
+        range_findings = self._range_findings(
+            explained_spans=explained_spans,
+            signal_matches=signal_matches,
+        )
+
+        findings: list[PeriodPhraseMatch] = []
+        for finding in sorted(
+            range_findings,
+            key=lambda item: (item.span[0], -(item.span[1] - item.span[0])),
+        ):
+            if any(
+                self._overlaps(finding.span, existing.span) for existing in findings
+            ):
+                continue
+            findings.append(finding)
+
+        for signal in signal_matches:
+            if any(self._covered(signal.span, (finding.span,)) for finding in findings):
+                continue
+            if any(self._overlaps(signal.span, existing.span) for existing in findings):
+                continue
+            findings.append(signal)
+        return tuple(sorted(findings, key=lambda item: item.span))
+
+
 def resolve_period_intent(
     request: str,
     *,
@@ -2082,6 +2486,21 @@ def resolve_period_intent(
         anchor=anchor,
     )
 
+    safety_findings = PeriodSafetyAudit(
+        text=text,
+        protected_spans=tuple(_protected_filter_value_spans(text)),
+        recognized_spans=tuple(occupied),
+        phrase_matches=tuple(matches),
+    ).run()
+    matches.extend(safety_findings)
+
+    # A local valid atom cannot stand in for a request that also contains an
+    # invalid, ambiguous, or otherwise unexplained period structure.  Clear
+    # all explicit intervals before computing requested_days so callers never
+    # receive a silently shortened intent.
+    if any(match.outcome != "resolved" for match in matches):
+        explicit_periods = []
+
     matches.sort(key=lambda item: item.span)
     invalid_matches = [match for match in matches if match.outcome == "invalid_period"]
     clarification_matches = [
@@ -2133,6 +2552,9 @@ def resolve_period_intent(
             return replace(
                 intent,
                 outcome="invalid_period",
+                explicit_periods=(),
+                requested_days=0,
+                implicit_periods=(),
                 reason_code=reason_code,
                 message=message,
             )
@@ -2368,6 +2790,7 @@ __all__ = [
     "PeriodIntent",
     "PeriodInterval",
     "PeriodPhraseMatch",
+    "PeriodSafetyAudit",
     "analysis_ignored_chinese_phrases",
     "analysis_ignored_english_tokens",
     "explicit_date_range_separator_spans",

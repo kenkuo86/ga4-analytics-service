@@ -192,6 +192,46 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
                     "invalid_date_format",
                 )
 
+    def test_period_safety_audit_fails_closed_for_range_mutations(self):
+        valid = resolve_period_intent(
+            "GA4 sessions 2026-09-01 to 2026-09-07",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(valid.outcome, "resolved")
+        self.assertEqual(valid.requested_days, 7)
+        self.assertEqual(valid.explicit_periods[0].start_date, date(2026, 9, 1))
+        self.assertEqual(valid.explicit_periods[0].end_date, date(2026, 9, 7))
+
+        mutations = (
+            # Delete the start endpoint.
+            "GA4 sessions to 2026-09-07",
+            # Delete the end endpoint.
+            "GA4 sessions 2026-09-01 to",
+            # Truncate one endpoint.
+            "GA4 sessions 2026-09 to 2026-09-07",
+            # Leave a terminal connector.
+            "GA4 sessions 2026-09-01 -",
+            # Leave a leading connector.
+            "GA4 sessions - 2026-09-01",
+            # Replace the supported connector with an unsupported one.
+            "GA4 sessions 2026-09-01 until 2026-09-07",
+        )
+        for request in mutations:
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+                self.assertIn(
+                    result.outcome,
+                    {"needs_clarification", "invalid_period"},
+                )
+                self.assertNotEqual(result.outcome, "none")
+                self.assertEqual(result.requested_days, 0)
+                self.assertFalse(result.explicit_periods)
+
     def test_unsupported_range_connectors_do_not_count_endpoints_independently(self):
         for request in (
             "GA4 sessions 2026-01-01 until 2026-09-01",
@@ -267,6 +307,7 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
         for request in (
             "GA4 sessions from 2026-abc-01",
             "GA4 sessions date is 2026-abc-01",
+            "GA4 sessions date 2026-09",
             "GA4 sessions today through 2026-abc-01",
         ):
             with self.subTest(request=request):
@@ -285,6 +326,25 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
             today=date(2026, 9, 14),
         )
         self.assertEqual(filter_result.outcome, "none")
+
+    def test_period_safety_audit_does_not_shorten_around_unexplained_residue(self):
+        for request in (
+            "GA4 sessions today, 180-day trend",
+            "GA4 sessions past 7 days, date 2026-09",
+            "GA4 sessions today to",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+                self.assertIn(
+                    result.outcome,
+                    {"needs_clarification", "invalid_period"},
+                )
+                self.assertEqual(result.requested_days, 0)
+                self.assertFalse(result.explicit_periods)
 
     def test_explicit_filter_values_are_excluded_before_period_parsing(self):
         filter_only_requests = (
@@ -317,6 +377,18 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
         self.assertEqual(filter_and_period.requested_days, 1)
         self.assertEqual(len(filter_and_period.explicit_periods), 1)
         self.assertEqual(filter_and_period.explicit_periods[0].phrase, "today")
+
+        protected_partial_identifier = resolve_period_intent(
+            "GA4 sessions for campaign 2026-09, today",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(protected_partial_identifier.outcome, "resolved")
+        self.assertEqual(protected_partial_identifier.requested_days, 1)
+        self.assertEqual(
+            protected_partial_identifier.explicit_periods[0].phrase,
+            "today",
+        )
 
         metric_and_period = resolve_period_intent(
             "GA4 landing page today",
@@ -970,6 +1042,41 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
                 self.assertEqual(result["next_action"]["type"], "ask_user")
                 self.assertEqual(result["period"]["reason_code"], period_reason)
                 self.assertEqual(result["period"]["requested_days"], 0)
+
+    def test_period_safety_audit_clears_valid_prefix_before_tool_choice(self):
+        result = capability_registry.resolve(
+            "GA4 sessions today, 180-day trend",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+
+        self.assertEqual(result["resolution"], "needs_clarification")
+        self.assertEqual(result["reason_code"], "ambiguous_period")
+        self.assertEqual(result["next_action"]["type"], "ask_user")
+        self.assertEqual(result["period"]["requested_days"], 0)
+        self.assertEqual(result["period"]["explicit_periods"], [])
+
+    def test_period_safety_mutations_never_select_a_data_tool(self):
+        for request in (
+            "GA4 sessions to 2026-09-07",
+            "GA4 sessions 2026-09-01 to",
+            "GA4 sessions 2026-09 to 2026-09-07",
+            "GA4 sessions 2026-09-01 -",
+            "GA4 sessions - 2026-09-01",
+            "GA4 sessions 2026-09-01 until 2026-09-07",
+            "GA4 sessions date 2026-09",
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["next_action"]["type"], "ask_user")
+                self.assertEqual(result["period"]["requested_days"], 0)
+                self.assertEqual(result["period"]["explicit_periods"], [])
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
         policy = _policy(max_days=31, time_zone="UTC")

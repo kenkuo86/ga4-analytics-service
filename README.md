@@ -112,7 +112,7 @@ connector eval 驗收。
 
 `period_contract.py` 是相對期間 vocabulary、解析規則、capability metadata、server
 instructions 與 Phase 10 eval fixture 的 versioned 單一來源，目前 contract version 為
-`1.0.5`。它會將使用者需求標準化為 `explicit_periods`、`requested_days` 與
+`1.0.6`。它會將使用者需求標準化為 `explicit_periods`、`requested_days` 與
 `implicit_periods`：`requested_days` 是所有 explicit periods 聯集中的不重複 calendar
 days，因此重疊、相鄰、拆分的區段以及 `group by month` 都不能繞過限制。相對期間以
 `GA4_QUERY_TIME_ZONE` 的 today 為 anchor，無法唯一判斷的數量或 window kind 會要求釐清，
@@ -123,7 +123,10 @@ range separator 會被視為同一個日期區間，超出日期可處理範圍�
 不支援的 range connector（包含任何未列於 contract 的日期連接文字，例如
 `until`／`截至`／`before`）與非正整數期間數量（例如 `100.5 days`）會要求釐清或回傳
 `invalid_period`，不會把端點或數量靜默改成另一個查詢。日期之間只有 contract
-明列的獨立期間 joiner 才會被當成多個 explicit periods。
+明列的獨立期間 joiner 才會被當成多個 explicit periods。解析完成後，中央
+`PeriodSafetyAudit` 會再檢查未受保護的 period/date span 與 range connector；若仍有
+截斷日期、未消化 residue 或不完整 connector，會清空 `explicit_periods`、將
+`requested_days` 設為 0 並要求釐清。
 
 Intent-level 上限直接讀取 active `QueryPolicy.max_date_range_days`，不在 instructions、
 metadata 或 eval implementation 寫死預設值。剛好等於上限可以繼續，上限加一天會在
