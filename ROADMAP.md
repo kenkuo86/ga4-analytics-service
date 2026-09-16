@@ -13,7 +13,8 @@
 - 已有 catalog builder、runtime compiler、OAuth、tenant resolution、跨 tenant dry-run 與部署前後驗證。
 - 所有 GA4 data query 已套用共用日期與 BigQuery bytes policy，billing project 另有 daily custom query quota。
 
-目前 Phase 4–9 已完成，下一階段為 Phase 10 的使用者需求層級日期邊界。其餘工作包含持續監控成本、權限、tenant registry 品質及 connector 行為。
+目前 Phase 4–10 已完成；Phase 10 已由 PR #13 合併至 remote `main`。其餘工作包含持續
+監控成本、權限、tenant registry 品質及 connector 行為。
 
 ## Completed foundations
 
@@ -77,7 +78,7 @@ Dependencies: Foundations 1–2
 
 ## Implementation roadmap
 
-以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–9 已完成，Phase 10 尚待實作。
+以下各階段依成本與資料安全優先，再逐步改善可信度及使用體驗；目前 Phase 4–10 已完成。
 
 ### Phase 4: unified query cost controls
 
@@ -287,9 +288,17 @@ Dependencies: Phases 5–6
 
 ### Phase 10: intent-level date-range boundary
 
-Status: Planned
+Status: Done
 
 Dependencies: Phases 4–5
+
+2026-09-16 已由 PR #13 完成並合併至 `main`：新增 versioned `period_phrase_contract` 與
+deterministic `PeriodIntent`／`PeriodSafetyAudit`，以 explicit period 聯集計算
+`requested_days`，並將 active `QueryPolicy.max_date_range_days` 同步至 capability
+metadata、tool descriptions、server instructions 及 capability preflight。超限、無效或
+語意不明的期間會在 tenant registry／BigQuery 前拒絕；同步新增 Phase 10 behavior fixture、
+專用測試及 README 說明。實際 Claude Custom Connector 的部署後 tool choice、回答措辭與
+不拆分／不重試行為仍依本階段驗收矩陣持續驗證。
 
 Phase 4 已完成的 `QueryPolicy` 會驗證每個 `query_ga4`、`traffic_summary` 或 REST request
 收到的日期範圍，但目前無法辨識多個合法 tool calls 是否源自同一個超過 active
