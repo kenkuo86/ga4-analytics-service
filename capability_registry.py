@@ -1,14 +1,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import re
 import unicodedata
 from typing import Any
 
+from period_contract import (
+    analysis_ignored_chinese_phrases,
+    analysis_ignored_english_tokens,
+    explicit_date_range_separator_spans,
+    is_period_range_connector,
+    is_query_context_clause,
+    period_contract_inventory,
+    period_instruction,
+    period_limit_message,
+    PeriodIntent,
+    resolve_period_intent,
+    strip_non_period_filter_values,
+)
+from query_policy import QueryPolicy
 from semantic_catalog import SemanticCatalog, semantic_catalog
 
 
-CAPABILITY_REGISTRY_VERSION = "1.1.0"
+CAPABILITY_REGISTRY_VERSION = "1.2.1"
+
+
+def _active_query_policy(policy: Any = None) -> Any:
+    if policy is not None:
+        return policy
+    from query_policy import query_policy
+
+    return query_policy
 
 
 @dataclass(frozen=True)
@@ -97,6 +120,10 @@ the normal compact result.
     "traffic_summary": """
 Get GA4 traffic summary by the customer's registered formal name or exact
 managed alias and date range.
+
+The request may contain one user-specified current date range. The previous
+period is generated implicitly by the report contract; two user-specified
+date ranges cannot be represented by this tool and require clarification.
 
 Returns current period, previous period, and percentage change for total
 sessions, total users, new users, and returning users. When status is ok,
@@ -207,6 +234,10 @@ SUPPORTED_CAPABILITIES = (
         "description": "查詢 sessions、users、new users 與 returning users 的期間摘要及每日序列。",
         "data_source": "ga4",
         "tools": ("traffic_summary",),
+        "period_constraints": {
+            "max_explicit_periods": 1,
+            "comparison": "implicit_previous_only",
+        },
     },
     {
         "capability_id": "ga4_semantic_metrics",
@@ -220,6 +251,7 @@ SUPPORTED_CAPABILITIES = (
 
 CONSENT_LIMITATIONS = (
     "GA4 semantic catalog 中已發布的唯讀 metrics。",
+    "traffic_summary 只接受一個使用者指定的 current period；前期由 report contract 隱含產生。",
     "客戶、profile、project 與 dataset 只能由 tenant registry 解析。",
     "日期、單一 job、request 合計、timeout 與每日 BigQuery quota 均有服務端限制。",
     "不接受任意 BigQuery 或 SQL，也不提供資料新增、修改或刪除。",
@@ -445,18 +477,6 @@ class CapabilityRegistry:
             r"(?:customer|client|account|tenant)\s*[:：]\s*[a-z0-9][a-z0-9 ._-]*|"
             r"(?:客戶|帳戶|租戶)(?:名稱)?\s*(?:是|為|[:：])\s*[\u3400-\u9fff0-9a-z ._-]+)"
         )
-        self._period_qualifier_pattern = re.compile(
-            r"(?:"
-            r"(?:最近|過去|近|前|本|上|這|上一個)\s*(?:\d+|[一二三四五六七八九十]+)?\s*"
-            r"(?:天|日|週|周|星期|個月|月|年)|"
-            r"(?:今天|昨天|本週|這週|上週|本月|這個月|上個月|今年|去年)|"
-            r"(?:past|last|previous|recent)\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
-            r"(?:day|days|week|weeks|month|months|year|years)|"
-            r"(?:today|yesterday|this\s+week|last\s+week|this\s+month|last\s+month)|"
-            r"\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\s*(?:到|至|to|through|~|－|-)\s*\d{4}[-/]\d{1,2}[-/]\d{1,2})?"
-            r")"
-        )
-
     @staticmethod
     def _normalize(value: str) -> str:
         return unicodedata.normalize("NFKC", value).casefold().strip()
@@ -464,8 +484,16 @@ class CapabilityRegistry:
     def public_tool_names(self) -> tuple[str, ...]:
         return tuple(PUBLIC_TOOL_DESCRIPTIONS)
 
-    def tool_description(self, tool_name: str) -> str:
-        return PUBLIC_TOOL_DESCRIPTIONS[tool_name]
+    def tool_description(self, tool_name: str, *, policy: Any = None) -> str:
+        description = PUBLIC_TOOL_DESCRIPTIONS[tool_name]
+        if tool_name in {
+            "get_ga4_capabilities",
+            "search_ga4_metrics",
+            "query_ga4",
+            "traffic_summary",
+        }:
+            description = f"{description}\n\n{period_instruction(_active_query_policy(policy))}"
+        return description
 
     @staticmethod
     def _validate_public_metadata() -> None:
@@ -489,10 +517,10 @@ class CapabilityRegistry:
         if len(capability_ids) != len(set(capability_ids)):
             raise RuntimeError("Capability registry capability_id values must be unique.")
 
-    def consent_metadata(self) -> dict[str, Any]:
+    def consent_metadata(self, *, policy: Any = None) -> dict[str, Any]:
         """Return the user-facing capability contract used by OAuth consent."""
 
-        inventory = self.inventory()
+        inventory = self.inventory(policy=policy)
         return {
             "registry_version": inventory["registry_version"],
             "catalog_version": inventory["catalog_version"],
@@ -500,12 +528,15 @@ class CapabilityRegistry:
             "unsupported": inventory["unsupported"],
             "limitations": inventory["limitations"],
             "public_tools": inventory["public_tools"],
+            "period_phrase_contract": inventory["period_phrase_contract"],
+            "query_policy": inventory["query_policy"],
         }
 
-    def server_instructions(self) -> str:
+    def server_instructions(self, *, policy: Any = None) -> str:
         """Add the versioned public capability summary to MCP instructions."""
 
-        inventory = self.inventory()
+        active_policy = _active_query_policy(policy)
+        inventory = self.inventory(policy=active_policy)
         supported_lines = "\n".join(
             f"- {capability['label']}: {capability['description']}"
             for capability in inventory["supported"]
@@ -522,16 +553,23 @@ class CapabilityRegistry:
             f"{supported_lines}\n\n"
             "The explicit unsupported boundaries are:\n"
             f"{unsupported_lines}\n\n"
-            f"{_SERVER_INSTRUCTIONS_BASE}"
+            f"{_SERVER_INSTRUCTIONS_BASE}\n\n"
+            f"{period_instruction(active_policy)}"
         )
 
-    def inventory(self) -> dict[str, Any]:
+    def inventory(self, *, policy: Any = None) -> dict[str, Any]:
+        active_policy = _active_query_policy(policy)
         return {
             "status": "ok",
             "registry_version": self.version,
             "catalog_version": self.catalog.version,
             "data_access": "local_metadata_only",
             "selection_token_required": False,
+            "period_phrase_contract": period_contract_inventory(),
+            "query_policy": {
+                "max_date_range_days": active_policy.max_date_range_days,
+                "time_zone": active_policy.time_zone,
+            },
             "supported": [
                 {
                     **capability,
@@ -548,12 +586,22 @@ class CapabilityRegistry:
                 for intent in self.unsupported_intents
             ],
             "public_tools": list(self.public_tool_names()),
-            "limitations": list(CONSENT_LIMITATIONS),
+            "limitations": [
+                *CONSENT_LIMITATIONS,
+                period_limit_message(active_policy),
+            ],
         }
 
-    def resolve(self, request: str | None = None) -> dict[str, Any]:
+    def resolve(
+        self,
+        request: str | None = None,
+        *,
+        policy: Any = None,
+        today: Any = None,
+    ) -> dict[str, Any]:
+        active_policy = _active_query_policy(policy)
         if request is None:
-            return self.inventory()
+            return self.inventory(policy=active_policy)
         if not isinstance(request, str) or not request.strip():
             return self._resolution(
                 request=request if isinstance(request, str) else "",
@@ -625,7 +673,89 @@ class CapabilityRegistry:
                     next_action={"type": "explain_boundary"},
                 )
 
-        unresolved_clause = self._unresolved_mixed_clause(normalized_request)
+        is_traffic_request = re.search(
+            r"流量摘要|traffic\s+summary", normalized_request
+        ) is not None
+        period_intent = resolve_period_intent(
+            normalized_request,
+            policy=active_policy,
+            today=today,
+            include_previous_comparison=is_traffic_request,
+        )
+        period_result = period_intent.as_dict()
+        has_ga4_data_request = bool(
+            self._explicit_ga4_pattern.search(normalized_request)
+            or is_traffic_request
+        )
+        if has_ga4_data_request and period_intent.outcome in {
+            "needs_clarification",
+            "invalid_period",
+        }:
+            return self._resolution(
+                request=request,
+                resolution="needs_clarification",
+                reason_code="invalid_period"
+                if period_intent.outcome == "invalid_period"
+                else "ambiguous_period",
+                message=period_intent.message
+                or "請提供可以唯一判斷的日期範圍。",
+                next_action={
+                    "type": "ask_user",
+                    "question": "請提供不超過目前日期上限的明確日期範圍。",
+                },
+                period=period_result,
+            )
+        if (
+            has_ga4_data_request
+            and period_intent.outcome == "resolved"
+            and period_intent.requested_days > active_policy.max_date_range_days
+        ):
+            max_days = active_policy.max_date_range_days
+            requested_days = period_intent.requested_days
+            return self._resolution(
+                request=request,
+                resolution="needs_clarification",
+                reason_code="date_range_too_large",
+                message=(
+                    f"完整使用者需求涵蓋 {requested_days} 個不重複 calendar days，"
+                    f"超過目前 GA4 日期上限 {max_days} 天；請重新選擇不超過 "
+                    f"{max_days} 天的期間。不得自行拆分、分頁、改用其他 data tool 或重試。"
+                ),
+                next_action={
+                    "type": "ask_user",
+                    "question": f"請重新選擇不超過 {max_days} 天的完整期間。",
+                },
+                period=period_result,
+            )
+
+        if is_traffic_request:
+            period_capability_error = self._period_capability_error(
+                "ga4_traffic_summary",
+                period_intent,
+            )
+            if period_capability_error is not None:
+                reason_code, message = period_capability_error
+                return self._resolution(
+                    request=request,
+                    resolution="needs_clarification",
+                    reason_code=reason_code,
+                    message=message,
+                    next_action={
+                        "type": "ask_user",
+                        "question": (
+                            "請提供一個 current date range；若要比較另一段自訂期間，"
+                            "請改用支援多段期間的分析方式。"
+                        ),
+                    },
+                    period=period_result,
+                )
+
+        unresolved_clause = self._unresolved_mixed_clause(
+            normalized_request,
+            policy=active_policy,
+            today=today,
+            include_previous_comparison=is_traffic_request,
+        )
         if unresolved_clause is not None:
             return self._resolution(
                 request=request,
@@ -636,15 +766,17 @@ class CapabilityRegistry:
                     "type": "ask_user",
                     "question": f"請確認是否只查 GA4；無法確認的部分：{unresolved_clause}",
                 },
+                period=period_result,
             )
 
-        if re.search(r"流量摘要|traffic\s+summary", normalized_request):
+        if is_traffic_request:
             return self._resolution(
                 request=request,
                 resolution="supported",
                 reason_code="ga4_traffic_summary",
                 message="可使用固定的 GA4 traffic summary 查詢。",
                 next_action={"type": "call_tool", "tool": "traffic_summary"},
+                period=period_result,
             )
 
         if self._explicit_ga4_pattern.search(normalized_request):
@@ -676,6 +808,7 @@ class CapabilityRegistry:
                 message="本機 semantic catalog 有可用的 GA4 metric 候選。",
                 next_action={"type": "call_tool", "tool": "search_ga4_metrics"},
                 metric_candidates=search_result["metrics"],
+                period=period_result,
             )
 
         return self._resolution(
@@ -687,6 +820,7 @@ class CapabilityRegistry:
                 "type": "ask_user",
                 "question": "請指定想查看的 GA4 指標或分析維度。",
             },
+            period=period_result,
         )
 
     def _affirmative_request(self, request: str) -> str:
@@ -702,10 +836,21 @@ class CapabilityRegistry:
             for clause in clauses
         ]
         result = " ".join(without_exclusions)
-        result = self._trailing_clause_separator_pattern.sub("", result)
+        trailing_separator = self._trailing_clause_separator_pattern.search(result)
+        if trailing_separator is not None and not is_period_range_connector(
+            trailing_separator.group()
+        ):
+            result = result[: trailing_separator.start()]
         return result.strip(" ，,。；;")
 
-    def _unresolved_mixed_clause(self, request: str) -> str | None:
+    def _unresolved_mixed_clause(
+        self,
+        request: str,
+        *,
+        policy: QueryPolicy,
+        today: date | None,
+        include_previous_comparison: bool = False,
+    ) -> str | None:
         """Return the first affirmative mixed clause not covered by GA4 metadata."""
 
         if not (
@@ -715,23 +860,88 @@ class CapabilityRegistry:
             return None
         clauses = [
             clause.strip()
-            for clause in self._clause_separator_pattern.split(request)
+            for clause in self._split_mixed_clauses(request)
             if clause.strip()
         ]
         if len(clauses) < 2:
             return None
 
         for clause in clauses:
-            if self._is_query_qualifier_clause(clause):
+            if self._is_query_qualifier_clause(
+                clause,
+                include_previous_comparison=include_previous_comparison,
+            ):
                 continue
             if re.search(r"流量摘要|traffic\s+summary", clause):
                 continue
-            candidates = self.catalog.search(clause, limit=10)["metrics"]
+            catalog_clause = self._without_resolved_period_context(
+                clause,
+                policy=policy,
+                today=today,
+                include_previous_comparison=include_previous_comparison,
+            )
+            candidates = self.catalog.search(catalog_clause, limit=10)["metrics"]
             if not candidates or not self._has_complete_catalog_match(
-                clause, candidates
+                catalog_clause, candidates
             ):
                 return clause
         return None
+
+    def _without_resolved_period_context(
+        self,
+        clause: str,
+        *,
+        policy: QueryPolicy,
+        today: date | None,
+        include_previous_comparison: bool = False,
+    ) -> str:
+        """Remove parser-owned periods before checking metric completeness."""
+
+        normalized = " ".join(self._normalize(clause).split())
+        period_intent = resolve_period_intent(
+            normalized,
+            policy=policy,
+            today=today,
+            include_previous_comparison=include_previous_comparison,
+        )
+        result = normalized
+        if period_intent.outcome == "resolved":
+            for match in sorted(
+                period_intent.phrase_matches,
+                key=lambda item: item.span[0],
+                reverse=True,
+            ):
+                start, end = match.span
+                result = f"{result[:start]} {result[end:]}"
+        return strip_non_period_filter_values(result)
+
+    def _split_mixed_clauses(self, request: str) -> list[str]:
+        """Split mixed requests without breaking parser/catalog connectors."""
+
+        masked_request = request
+        replacements: list[tuple[str, str]] = []
+        protected_spans = set(explicit_date_range_separator_spans(request))
+        protected_spans.update(
+            match.span("separator")
+            for match in re.finditer(
+                r"(?<![a-z])attributed\s+(?P<separator>to)(?![a-z])",
+                request,
+            )
+        )
+        for index, (start, end) in enumerate(reversed(sorted(protected_spans))):
+            marker = f"\ue000{index}\ue001"
+            original_separator = request[start:end]
+            masked_request = masked_request[:start] + marker + masked_request[end:]
+            replacements.append((marker, original_separator))
+
+        clauses = self._clause_separator_pattern.split(masked_request)
+        restored_clauses: list[str] = []
+        for clause in clauses:
+            restored = clause
+            for marker, original_separator in replacements:
+                restored = restored.replace(marker, original_separator)
+            restored_clauses.append(restored)
+        return restored_clauses
 
     def _has_complete_catalog_match(
         self,
@@ -786,6 +996,7 @@ class CapabilityRegistry:
             "years",
             "yesterday",
         }
+        ignored_tokens.update(analysis_ignored_english_tokens())
         known_ga4_values = {"direct", "natural", "organic", "paid", "referral"}
         request_tokens = {
             token
@@ -879,6 +1090,7 @@ class CapabilityRegistry:
             "裝置",
             "轉換",
         }
+        ignored_chinese_phrases.update(analysis_ignored_chinese_phrases())
         catalog_chinese_phrases = {
             phrase
             for candidate in candidates
@@ -896,14 +1108,56 @@ class CapabilityRegistry:
             chinese_residue = chinese_residue.replace(phrase, "")
         return not chinese_residue
 
-    def _is_query_qualifier_clause(self, clause: str) -> bool:
+    def _is_query_qualifier_clause(
+        self,
+        clause: str,
+        *,
+        include_previous_comparison: bool = False,
+    ) -> bool:
         """Recognize customer and period context, not a second analysis request."""
 
         normalized = clause.strip()
         return bool(
             self._customer_qualifier_pattern.fullmatch(normalized)
-            or self._period_qualifier_pattern.fullmatch(normalized)
+            or is_query_context_clause(
+                normalized,
+                include_previous_comparison=include_previous_comparison,
+            )
         )
+
+    @staticmethod
+    def _period_capability_error(
+        capability_id: str,
+        period_intent: PeriodIntent,
+    ) -> tuple[str, str] | None:
+        """Validate that a resolved period fits the selected tool contract."""
+
+        capability = next(
+            (
+                item
+                for item in SUPPORTED_CAPABILITIES
+                if item["capability_id"] == capability_id
+            ),
+            None,
+        )
+        if capability is None:
+            return None
+        constraints = capability.get("period_constraints")
+        if not isinstance(constraints, dict):
+            return None
+        max_explicit_periods = constraints.get("max_explicit_periods")
+        if (
+            isinstance(max_explicit_periods, int)
+            and len(period_intent.explicit_periods) > max_explicit_periods
+        ):
+            return (
+                "traffic_comparison_not_representable",
+                (
+                    "traffic_summary 只能表示一個使用者指定的 current date range；"
+                    "前期只能由 report contract 自動產生，無法直接執行兩個自訂日期區間。"
+                ),
+            )
+        return None
 
     def _has_catalog_match(
         self,
@@ -1006,6 +1260,7 @@ class CapabilityRegistry:
         message: str,
         next_action: dict[str, Any],
         metric_candidates: list[dict[str, Any]] | None = None,
+        period: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {
             "status": "ok",
@@ -1020,6 +1275,8 @@ class CapabilityRegistry:
         }
         if metric_candidates is not None:
             result["metric_candidates"] = metric_candidates
+        if period is not None:
+            result["period"] = period
         return result
 
 

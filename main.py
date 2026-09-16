@@ -522,7 +522,7 @@ def search_ga4_metric_catalog(
 def get_ga4_capability_resolution(request: str | None = None) -> dict[str, Any]:
     """Resolve connector capabilities from local versioned metadata only."""
 
-    return capability_registry.resolve(request)
+    return capability_registry.resolve(request, policy=query_policy)
 
 
 def _serialize_bigquery_value(value: Any) -> Any:

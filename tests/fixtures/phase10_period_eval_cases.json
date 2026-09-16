@@ -1,0 +1,1113 @@
+{
+  "contract_version": "1.0.6",
+  "cases": [
+    {
+      "case_id": "single_day_today",
+      "phrase": "今天",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "single_day",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 1
+    },
+    {
+      "case_id": "single_day_yesterday",
+      "phrase": "yesterday",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "single_day",
+      "expected_start_date": "2026-09-13",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 1
+    },
+    {
+      "case_id": "single_day_today_english",
+      "phrase": "today",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "single_day",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 1
+    },
+    {
+      "case_id": "single_day_yesterday_chinese",
+      "phrase": "昨天",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "single_day",
+      "expected_start_date": "2026-09-13",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 1
+    },
+    {
+      "case_id": "rolling_days_arabic",
+      "phrase": "過去 7 天",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_days",
+      "expected_start_date": "2026-09-08",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "rolling_days_english_word",
+      "phrase": "past seven days",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_days",
+      "expected_start_date": "2026-09-08",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "rolling_days_unit_alias",
+      "phrase": "近 3 日",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_days",
+      "expected_start_date": "2026-09-12",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "rolling_days_recent_prefix",
+      "phrase": "最近 3 天",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_days",
+      "expected_start_date": "2026-09-12",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "rolling_days_last_prefix",
+      "phrase": "last 3 days",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_days",
+      "expected_start_date": "2026-09-12",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "previous_days_chinese",
+      "phrase": "前 2 天",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "previous_days",
+      "expected_start_date": "2026-09-12",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 2
+    },
+    {
+      "case_id": "previous_days_unit_alias",
+      "phrase": "前 2 日",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "previous_days",
+      "expected_start_date": "2026-09-12",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 2
+    },
+    {
+      "case_id": "previous_days_english",
+      "phrase": "previous 2 days",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "previous_days",
+      "expected_start_date": "2026-09-12",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 2
+    },
+    {
+      "case_id": "previous_days_last_day",
+      "phrase": "last day",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "previous_days",
+      "expected_start_date": "2026-09-13",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 1
+    },
+    {
+      "case_id": "rolling_weeks_chinese",
+      "phrase": "過去 13 週",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_weeks",
+      "expected_start_date": "2026-06-16",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 91
+    },
+    {
+      "case_id": "rolling_weeks_zh_zhou_alias",
+      "phrase": "過去 2 周",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_weeks",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "rolling_weeks_zh_weekday_alias",
+      "phrase": "近 2 星期",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_weeks",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "rolling_weeks_english",
+      "phrase": "last 2 weeks",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_weeks",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "rolling_weeks_recent_english",
+      "phrase": "recent 2 weeks",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_weeks",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "completed_weeks_chinese",
+      "phrase": "前兩週",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-08-31",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "completed_weeks_english",
+      "phrase": "previous 2 weeks",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-08-31",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "completed_weeks_last_week",
+      "phrase": "上週",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "completed_weeks_zh_zhou_alias",
+      "phrase": "前 1 周",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "completed_weeks_zh_weekday_alias",
+      "phrase": "前 1 星期",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "completed_weeks_last_week_simplified",
+      "phrase": "上周",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "completed_weeks_previous_alias",
+      "phrase": "上一周",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "completed_weeks_previous_traditional_alias",
+      "phrase": "上一週",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "completed_weeks_last_week_english",
+      "phrase": "last week",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_weeks",
+      "expected_start_date": "2026-09-07",
+      "expected_end_date": "2026-09-13",
+      "expected_requested_days": 7
+    },
+    {
+      "case_id": "week_to_date_chinese",
+      "phrase": "本週",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "week_to_date",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-16",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "week_to_date_simplified",
+      "phrase": "本周",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "week_to_date",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-16",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "week_to_date_this_traditional",
+      "phrase": "這週",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "week_to_date",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-16",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "week_to_date_this_simplified",
+      "phrase": "這周",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "week_to_date",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-16",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "week_to_date_english",
+      "phrase": "this week",
+      "today": "2026-09-16",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "week_to_date",
+      "expected_start_date": "2026-09-14",
+      "expected_end_date": "2026-09-16",
+      "expected_requested_days": 3
+    },
+    {
+      "case_id": "rolling_months_three",
+      "phrase": "近三個月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_past_three",
+      "phrase": "過去三個月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_simplified_unit",
+      "phrase": "最近 3 个月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_month_unit_alias",
+      "phrase": "近 3 月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_half_year",
+      "phrase": "過去半年",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-03-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 184
+    },
+    {
+      "case_id": "rolling_months_english",
+      "phrase": "past 3 months",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_recent_english",
+      "phrase": "recent 3 months",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_last_english",
+      "phrase": "last 3 months",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-06-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 92
+    },
+    {
+      "case_id": "rolling_months_half_year_english",
+      "phrase": "last half year",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-03-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 184
+    },
+    {
+      "case_id": "rolling_months_half_year_english_article",
+      "phrase": "past half a year",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_months",
+      "expected_start_date": "2026-03-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 184
+    },
+    {
+      "case_id": "completed_months_chinese",
+      "phrase": "前兩個月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-07-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 62
+    },
+    {
+      "case_id": "completed_months_simplified_unit",
+      "phrase": "前兩个月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-07-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 62
+    },
+    {
+      "case_id": "completed_months_month_unit_alias",
+      "phrase": "前 1 月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-08-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 31
+    },
+    {
+      "case_id": "completed_months_english",
+      "phrase": "previous 2 months",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-07-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 62
+    },
+    {
+      "case_id": "completed_months_last_month",
+      "phrase": "last month",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-08-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 31
+    },
+    {
+      "case_id": "completed_months_last_month_traditional",
+      "phrase": "上個月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-08-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 31
+    },
+    {
+      "case_id": "completed_months_last_month_simplified",
+      "phrase": "上个月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-08-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 31
+    },
+    {
+      "case_id": "completed_months_previous_alias",
+      "phrase": "上一個月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_months",
+      "expected_start_date": "2026-08-01",
+      "expected_end_date": "2026-08-31",
+      "expected_requested_days": 31
+    },
+    {
+      "case_id": "month_to_date_chinese",
+      "phrase": "本月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "month_to_date",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "month_to_date_english",
+      "phrase": "this month",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "month_to_date",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "month_to_date_this_traditional",
+      "phrase": "這個月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "month_to_date",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "month_to_date_this_simplified",
+      "phrase": "这个月",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "month_to_date",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 14
+    },
+    {
+      "case_id": "rolling_years_leap_boundary",
+      "phrase": "過去一年",
+      "today": "2024-02-29",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_years",
+      "expected_start_date": "2023-03-01",
+      "expected_end_date": "2024-02-29",
+      "expected_requested_days": 366
+    },
+    {
+      "case_id": "rolling_years_recent",
+      "phrase": "最近 1 年",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_years",
+      "expected_start_date": "2025-09-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "rolling_years_near_alias",
+      "phrase": "近 1 年",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_years",
+      "expected_start_date": "2025-09-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "rolling_years_past_english",
+      "phrase": "past 1 year",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_years",
+      "expected_start_date": "2025-09-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "rolling_years_recent_english",
+      "phrase": "recent 1 year",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_years",
+      "expected_start_date": "2025-09-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "rolling_years_english",
+      "phrase": "last 2 years",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "rolling_years",
+      "expected_start_date": "2024-09-15",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 730
+    },
+    {
+      "case_id": "completed_years_leap_boundary",
+      "phrase": "去年",
+      "today": "2024-02-29",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_years",
+      "expected_start_date": "2023-01-01",
+      "expected_end_date": "2023-12-31",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "completed_years_previous_chinese",
+      "phrase": "前 1 年",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_years",
+      "expected_start_date": "2025-01-01",
+      "expected_end_date": "2025-12-31",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "completed_years_last_english",
+      "phrase": "last year",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_years",
+      "expected_start_date": "2025-01-01",
+      "expected_end_date": "2025-12-31",
+      "expected_requested_days": 365
+    },
+    {
+      "case_id": "completed_years_english",
+      "phrase": "previous 2 years",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "completed_years",
+      "expected_start_date": "2024-01-01",
+      "expected_end_date": "2025-12-31",
+      "expected_requested_days": 731
+    },
+    {
+      "case_id": "year_to_date_chinese",
+      "phrase": "今年",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "year_to_date",
+      "expected_start_date": "2026-01-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 257
+    },
+    {
+      "case_id": "year_to_date_english",
+      "phrase": "this year",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "year_to_date",
+      "expected_start_date": "2026-01-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 257
+    },
+    {
+      "case_id": "explicit_single_date",
+      "phrase": "2026-09-01",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "explicit_date",
+      "expected_start_date": "2026-09-01",
+      "expected_end_date": "2026-09-01",
+      "expected_requested_days": 1
+    },
+    {
+      "case_id": "explicit_date_range",
+      "phrase": "2026-06-17 to 2026-09-14",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "explicit_date",
+      "expected_start_date": "2026-06-17",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 90
+    },
+    {
+      "case_id": "implicit_previous_modifier",
+      "phrase": "compare with the previous period",
+      "today": "2026-09-14",
+      "include_previous_comparison": true,
+      "expected_outcome": "resolved",
+      "expected_window_kind": "fixed_previous_comparison",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "unsupported_generic_previous_modifier",
+      "phrase": "compare with the previous period",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_window_kind": "fixed_previous_comparison",
+      "expected_reason_code": "unsupported_comparison_modifier",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "invalid_slash_date",
+      "phrase": "2026/09/01",
+      "today": "2026-09-14",
+      "expected_outcome": "invalid_period",
+      "expected_reason_code": "invalid_date_format"
+    },
+    {
+      "case_id": "invalid_zero_quantity",
+      "phrase": "過去零天",
+      "today": "2026-09-14",
+      "expected_outcome": "invalid_period",
+      "expected_reason_code": "invalid_period_quantity"
+    },
+    {
+      "case_id": "invalid_negative_quantity",
+      "phrase": "過去負三天",
+      "today": "2026-09-14",
+      "expected_outcome": "invalid_period",
+      "expected_reason_code": "invalid_period_quantity"
+    },
+    {
+      "case_id": "ambiguous_quantity",
+      "phrase": "last many days",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "invalid_window_combination",
+      "phrase": "this three weeks",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unknown_relative_unit",
+      "phrase": "past 7 fortnights",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unknown_relative_unit_without_quantity",
+      "phrase": "past fortnight",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "punctuation_delimited_relative_period",
+      "phrase": "last-180-days",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "prefixless_punctuation_period_quantity",
+      "phrase": "180-day trend",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "unsupported_completed_quarter",
+      "phrase": "last quarter",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unsupported_year_to_date_alias",
+      "phrase": "year to date",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "period_quantity_without_prefix",
+      "phrase": "7 days",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period"
+    },
+    {
+      "case_id": "unsupported_unknown_date_connector",
+      "phrase": "2026-01-01 before 2026-09-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "unsupported_date_range_connector"
+    },
+    {
+      "case_id": "mixed_date_and_fixed_endpoint_range",
+      "phrase": "2026-01-01 through today",
+      "today": "2026-09-14",
+      "expected_outcome": "resolved",
+      "expected_window_kind": "explicit_date",
+      "expected_start_date": "2026-01-01",
+      "expected_end_date": "2026-09-14",
+      "expected_requested_days": 257
+    },
+    {
+      "case_id": "year_shaped_filter_is_not_a_date",
+      "phrase": "campaign summer2026-sale-us",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "numeric_filter_slug_is_not_a_date",
+      "phrase": "campaign 2026-09-sale",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "attribution_filter_slug_is_not_a_date",
+      "phrase": "attributed to 2026-09-sale",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "iso_shaped_campaign_value_is_not_a_date",
+      "phrase": "for campaign 2026-09-01",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "slash_shaped_source_value_is_not_a_date",
+      "phrase": "for source 2026/09/01",
+      "today": "2026-09-14",
+      "expected_outcome": "none",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "explicit_context_malformed_date",
+      "phrase": "from 2026-abc-01",
+      "today": "2026-09-14",
+      "expected_outcome": "invalid_period",
+      "expected_reason_code": "invalid_date_format"
+    },
+    {
+      "case_id": "chained_range_requires_clarification",
+      "phrase": "yesterday through today through 2026-01-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "unsupported_date_range_connector",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "range_prefix_with_independent_joiner_requires_clarification",
+      "phrase": "from 2026-01-01 and 2026-09-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "unsupported_date_range_connector",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "dangling_range_prefix_requires_clarification",
+      "phrase": "from 2026-01-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "incomplete_date_range",
+      "expected_requested_days": 0
+    }
+  ],
+  "behavior_cases": [
+    {
+      "case_id": "over_limit_half_year_by_month",
+      "request": "請查 GA4 sessions，過去半年、按月 group",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "date_range_too_large",
+      "expected_requested_days": 184,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "traffic_exact_limit_with_implicit_previous",
+      "request": "traffic summary 2026-06-17 to 2026-09-14 compare with the previous period",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_traffic_summary",
+      "expected_requested_days": 90,
+      "expected_implicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "explicit_comparison_ranges_are_union_counted",
+      "request": "GA4 sessions 2026-06-17 to 2026-09-14 and 2026-03-19 to 2026-06-16",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "date_range_too_large",
+      "expected_requested_days": 180,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "invalid_period_does_not_get_shortened",
+      "request": "GA4 sessions 2026/09/01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "invalid_period",
+      "expected_requested_days": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "unconsumed_period_residue_does_not_shorten_valid_prefix",
+      "request": "GA4 sessions today, 180-day trend",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "truncated_date_stops_tool_choice",
+      "request": "GA4 sessions date 2026-09",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "invalid_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "terminal_range_connector_stops_tool_choice",
+      "request": "GA4 sessions 2026-09-01 -",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "traffic_custom_comparison_is_not_representable",
+      "request": "traffic summary, 2026-08-01 to 2026-08-07 and 2026-07-01 to 2026-07-07",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "traffic_comparison_not_representable",
+      "expected_requested_days": 14,
+      "expected_explicit_periods": 2,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "mixed_endpoint_range_uses_full_duration",
+      "request": "GA4 sessions from 2026-01-01 through today",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "date_range_too_large",
+      "expected_requested_days": 257,
+      "expected_explicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "punctuation_joiner_preserves_period_union",
+      "request": "GA4 sessions 2026-08-01 to 2026-08-02, and 2026-09-01 to 2026-09-02",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 4,
+      "expected_explicit_periods": 2,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "chained_range_stops_before_tool_choice",
+      "request": "GA4 sessions yesterday through today through 2026-01-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "date_context_malformed_value_stops_tool_choice",
+      "request": "GA4 sessions date is 2026-abc-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "invalid_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "filter_value_does_not_pollute_explicit_periods",
+      "request": "GA4 sessions for campaign 2026-01-01, today",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 1,
+      "expected_explicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "protected_partial_identifier_plus_period",
+      "request": "GA4 sessions for campaign 2026-09, today",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 1,
+      "expected_explicit_periods": 1,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "unsupported_period_unit_stops_tool_choice",
+      "request": "GA4 sessions last quarter",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "range_prefix_prevents_split_period_bypass",
+      "request": "GA4 sessions from 2026-01-01 and 2026-09-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "punctuation_period_stops_tool_choice",
+      "request": "GA4 sessions past-180-days",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "date_range_filter_value_stays_outside_period_intent",
+      "request": "GA4 sessions for campaign=2026-01-01~2026-09-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "generic_previous_comparison_requires_current_contract",
+      "request": "GA4 sessions compare with the previous period",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "quoted_date_range_filter_stays_outside_period_intent",
+      "request": "GA4 sessions for campaign \"summer sale 2026-01-01 to 2026-09-01\"",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "supported",
+      "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "prefixless_punctuation_period_stops_tool_choice",
+      "request": "GA4 sessions 180-day trend",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "dangling_range_prefix_stops_tool_choice",
+      "request": "GA4 sessions from 2026-01-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    }
+  ]
+}
