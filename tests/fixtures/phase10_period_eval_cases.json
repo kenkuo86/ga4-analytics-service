@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0.4",
+  "contract_version": "1.0.5",
   "cases": [
     {
       "case_id": "single_day_today",
@@ -757,6 +757,14 @@
       "expected_requested_days": 0
     },
     {
+      "case_id": "prefixless_punctuation_period_quantity",
+      "phrase": "180-day trend",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0
+    },
+    {
       "case_id": "unsupported_completed_quarter",
       "phrase": "last quarter",
       "today": "2026-09-14",
@@ -850,6 +858,14 @@
       "today": "2026-09-14",
       "expected_outcome": "needs_clarification",
       "expected_reason_code": "unsupported_date_range_connector",
+      "expected_requested_days": 0
+    },
+    {
+      "case_id": "dangling_range_prefix_requires_clarification",
+      "phrase": "from 2026-01-01",
+      "today": "2026-09-14",
+      "expected_outcome": "needs_clarification",
+      "expected_reason_code": "incomplete_date_range",
       "expected_requested_days": 0
     }
   ],
@@ -1023,6 +1039,28 @@
       "max_days": 90,
       "expected_resolution": "supported",
       "expected_reason_code": "ga4_semantic_metric",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "prefixless_punctuation_period_stops_tool_choice",
+      "request": "GA4 sessions 180-day trend",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
+      "expected_requested_days": 0,
+      "expected_explicit_periods": 0,
+      "expected_bigquery_calls": 0
+    },
+    {
+      "case_id": "dangling_range_prefix_stops_tool_choice",
+      "request": "GA4 sessions from 2026-01-01",
+      "today": "2026-09-14",
+      "max_days": 90,
+      "expected_resolution": "needs_clarification",
+      "expected_reason_code": "ambiguous_period",
       "expected_requested_days": 0,
       "expected_explicit_periods": 0,
       "expected_bigquery_calls": 0

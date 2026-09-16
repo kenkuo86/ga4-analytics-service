@@ -10,6 +10,7 @@ from period_contract import (
     analysis_ignored_chinese_phrases,
     analysis_ignored_english_tokens,
     explicit_date_range_separator_spans,
+    is_period_range_connector,
     is_query_context_clause,
     period_contract_inventory,
     period_instruction,
@@ -835,7 +836,11 @@ class CapabilityRegistry:
             for clause in clauses
         ]
         result = " ".join(without_exclusions)
-        result = self._trailing_clause_separator_pattern.sub("", result)
+        trailing_separator = self._trailing_clause_separator_pattern.search(result)
+        if trailing_separator is not None and not is_period_range_connector(
+            trailing_separator.group()
+        ):
+            result = result[: trailing_separator.start()]
         return result.strip(" ，,。；;")
 
     def _unresolved_mixed_clause(

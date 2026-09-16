@@ -22,7 +22,7 @@ from query_policy import (
 )
 
 
-PERIOD_PHRASE_CONTRACT_VERSION = "1.0.4"
+PERIOD_PHRASE_CONTRACT_VERSION = "1.0.5"
 PERIOD_OUTCOMES = ("resolved", "needs_clarification", "invalid_period")
 
 _CHINESE_DIGIT_VALUES = {
@@ -557,11 +557,19 @@ PERIOD_PHRASE_CONTRACT = {
             "outcome": "needs_clarification",
         },
         {
+            "pattern": "incomplete_date_range",
+            "outcome": "needs_clarification",
+        },
+        {
             "pattern": "unconsumed_period_residue",
             "outcome": "needs_clarification",
         },
         {
             "pattern": "punctuation_delimited_relative_period",
+            "outcome": "needs_clarification",
+        },
+        {
+            "pattern": "punctuation_delimited_period_quantity",
             "outcome": "needs_clarification",
         },
         {
@@ -1020,6 +1028,13 @@ _UNSUPPORTED_EN_TO_DATE_PERIODS = (
 )
 _UNSUPPORTED_ZH_PERIOD_UNITS = ("季", "季度")
 _PERIOD_PUNCTUATION_SEPARATOR = r"(?:(?:[^\w\s]|_)+)"
+_PUNCTUATED_PERIOD_QUANTITY_RESIDUE_PATTERN = re.compile(
+    rf"(?<![a-z0-9])"
+    rf"(?:\d+(?:[.．]\d+)?|{_ENGLISH_QUANTITY}|[{_CHINESE_NUMBER_CHARS}]+)"
+    rf"\s*{_PERIOD_PUNCTUATION_SEPARATOR}\s*"
+    rf"(?:{_alternatives(_PERIOD_UNIT_ALIASES + _UNSUPPORTED_EN_PERIOD_UNITS + _UNSUPPORTED_ZH_PERIOD_UNITS)})"
+    rf"(?![a-z0-9])"
+)
 _PUNCTUATED_RELATIVE_PERIOD_PATTERN = re.compile(
     rf"(?<![a-z0-9])"
     rf"(?:{_alternatives(_ALL_RELATIVE_EN_PREFIXES + (_THIS_EN_PREFIX,))})"
@@ -1062,6 +1077,8 @@ _FILTER_VALUE_LABELS = (
     "页面",
     "頁面",
 )
+_CUSTOMER_QUALIFIER_LABELS = ("customer", "client", "account", "tenant")
+_CHINESE_CUSTOMER_QUALIFIER_LABELS = ("客戶", "帳戶", "租戶")
 _FILTER_VALUE = (
     r'(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|“[^”\r\n]*”|‘[^’\r\n]*’'
     r"|「[^」\r\n]*」|『[^』\r\n]*』|[^\s,，;；]+)"
@@ -1074,16 +1091,84 @@ _FILTER_VALUE_PATTERN = re.compile(
     rf"\s*(?:(?:is|equals?)\s+|(?:是|為|为)\s*|[:：=]\s*)"
     rf")(?P<value>{_FILTER_VALUE})"
 )
+_CUSTOMER_QUALIFIER_VALUE_PATTERN = re.compile(
+    rf"(?:"
+    rf"(?<![a-z0-9])for\s+{_alternatives(_CUSTOMER_QUALIFIER_LABELS)}(?![a-z0-9])"
+    rf"\s*(?:(?:is|equals?)\s+|[:：=]\s*)?"
+    rf"|(?<![a-z0-9]){_alternatives(_CUSTOMER_QUALIFIER_LABELS)}(?![a-z0-9])"
+    rf"\s*(?:(?:is|equals?)\s+|[:：=]\s*)"
+    rf"|{_alternatives(_CHINESE_CUSTOMER_QUALIFIER_LABELS)}(?:名稱)?"
+    rf"\s*(?:(?:是|為|为)\s*|[:：=]\s*)"
+    rf")(?P<value>{_FILTER_VALUE})"
+)
+_CUSTOMER_QUALIFIER_CLAUSE_END = (
+    r"[,，。；;]+|"
+    r"(?<![a-z])(?:and|but|or|plus|then|with|versus|vs\.?|to|against)(?![a-z])|"
+    r"(?<![a-z])(?:compared\s+(?:to|with)|in\s+comparison\s+(?:to|with))(?![a-z])|"
+    r"(?:以及|並且|同時|加上|然後|再查|或者|或|相較於|相較|相比於|相比|對比|(?<!參)與)|"
+    r"\s+[和跟]\s+"
+)
+_BARE_CUSTOMER_QUALIFIER_PATTERN = re.compile(
+    rf"(?<![a-z0-9])for\s+(?P<value>[a-z0-9][a-z0-9 ._-]*?)"
+    rf"(?=\s*(?:{_CUSTOMER_QUALIFIER_CLAUSE_END})|\s*$)"
+)
 _REVERSED_FILTER_VALUE_PATTERN = re.compile(
     rf"(?<![a-z0-9])from\s+(?P<value>{_FILTER_VALUE})\s+"
     rf"{_alternatives(_FILTER_VALUE_LABELS)}(?![a-z0-9])"
 )
+_QUERY_GROUPING_SUFFIX_PATTERN = re.compile(
+    r"(?:"
+    r"(?:(?:breakdown|group|grouping)\s+)?by\s+[a-z0-9][a-z0-9 _-]*"
+    r"|按\s*[\u3400-\u9fff0-9a-z _-]+"
+    r")"
+)
+
+
+def _is_supported_period_expression(value: str) -> bool:
+    candidate = value.strip()
+    patterns = (
+        _FIXED_PATTERN,
+        _DATE_RANGE_PATTERN,
+        _DATE_SINGLE_PATTERN,
+        *(rule.pattern for rule in _RELATIVE_RULES),
+    )
+    for pattern in patterns:
+        match = pattern.match(candidate)
+        if match is None or match.start() != 0:
+            continue
+        suffix = candidate[match.end() :].strip()
+        if not suffix:
+            return True
+        if (
+            _GROUPING_PATTERN.fullmatch(suffix) is not None
+            or _QUERY_GROUPING_SUFFIX_PATTERN.fullmatch(suffix) is not None
+        ):
+            return True
+    return False
 
 
 def _protected_filter_value_spans(text: str) -> list[tuple[int, int]]:
     """Return explicit GA4 filter values that period parsing must not consume."""
 
     spans = [match.span("value") for match in _FILTER_VALUE_PATTERN.finditer(text)]
+    spans.extend(
+        match.span("value")
+        for match in _CUSTOMER_QUALIFIER_VALUE_PATTERN.finditer(text)
+    )
+    for match in _BARE_CUSTOMER_QUALIFIER_PATTERN.finditer(text):
+        value = match.group("value")
+        relative_spans = [
+            relative.span()
+            for relative in _PUNCTUATED_RELATIVE_PERIOD_PATTERN.finditer(value)
+        ]
+        value_start = match.start("value")
+        for residue in _PUNCTUATED_PERIOD_QUANTITY_RESIDUE_PATTERN.finditer(value):
+            if _match_is_covered(residue.span(), relative_spans):
+                continue
+            suffix = value[residue.end() :]
+            if suffix.strip() and not _is_supported_period_expression(suffix):
+                continue
+            spans.append((value_start + residue.start(), value_start + residue.end()))
     spans.extend(
         match.span("value") for match in _REVERSED_FILTER_VALUE_PATTERN.finditer(text)
     )
@@ -1116,6 +1201,14 @@ _PERIOD_RANGE_LEADING_CONTEXT_PATTERN = re.compile(
     rf"|{_alternatives(('自', '從', '从'))}"
     rf")\s*$"
 )
+_DANGLING_RANGE_TRAILING_SEPARATORS = tuple(
+    separator
+    for separator in EXPLICIT_DATE_RANGE_SEPARATORS
+    if separator not in {"-", "－", "–", "—"}
+)
+_PERIOD_RANGE_TRAILING_CONTEXT_PATTERN = re.compile(
+    rf"^\s*(?:{_alternatives(_DANGLING_RANGE_TRAILING_SEPARATORS)})(?![a-z0-9])"
+)
 
 
 def _is_independent_period_joiner(value: str) -> bool:
@@ -1138,6 +1231,42 @@ def _has_period_range_leading_context(
     return (
         _PERIOD_RANGE_LEADING_CONTEXT_PATTERN.search(text[: endpoint.span[0]])
         is not None
+    )
+
+
+def _dangling_range_context_match(
+    text: str,
+    endpoint: PeriodPhraseMatch,
+) -> PeriodPhraseMatch | None:
+    """Reject range context that is missing a required endpoint."""
+
+    if endpoint.start_date is None or endpoint.end_date is None:
+        return None
+
+    is_single_endpoint = (
+        endpoint.start_date == endpoint.end_date
+        and _DATE_RANGE_PATTERN.fullmatch(endpoint.phrase) is None
+    )
+    leading = (
+        _PERIOD_RANGE_LEADING_CONTEXT_PATTERN.search(text[: endpoint.span[0]])
+        if is_single_endpoint
+        else None
+    )
+    trailing = _PERIOD_RANGE_TRAILING_CONTEXT_PATTERN.match(text[endpoint.span[1] :])
+    if leading is None and trailing is None:
+        return None
+
+    start = leading.start() if leading is not None else endpoint.span[0]
+    end = (
+        endpoint.span[1] + trailing.end() if trailing is not None else endpoint.span[1]
+    )
+    return PeriodPhraseMatch(
+        phrase=text[start:end].strip(),
+        outcome="needs_clarification",
+        span=(start, end),
+        window_kind="explicit_date",
+        reason_code="incomplete_date_range",
+        message="日期範圍只有一個端點；請提供完整的起訖日期。",
     )
 
 
@@ -1225,6 +1354,10 @@ def _normalize_period_connectors(
             endpoint = group[0]
             assert endpoint.start_date is not None
             assert endpoint.end_date is not None
+            dangling_range = _dangling_range_context_match(text, endpoint)
+            if dangling_range is not None:
+                assembled_matches.append(dangling_range)
+                continue
             assembled_matches.append(endpoint)
             assembled_intervals.append(
                 PeriodInterval(
@@ -1316,6 +1449,7 @@ def _period_residue_matches(
     matches: list[PeriodPhraseMatch] = []
     for pattern, force_clarification in (
         (_PUNCTUATED_RELATIVE_PERIOD_PATTERN, True),
+        (_PUNCTUATED_PERIOD_QUANTITY_RESIDUE_PATTERN, True),
         (_PERIOD_QUANTITY_RESIDUE_PATTERN, False),
         (_RELATIVE_QUANTITY_RESIDUE_PATTERN, False),
         (_UNSUPPORTED_PERIOD_RESIDUE_PATTERN, False),
@@ -1638,6 +1772,12 @@ def explicit_date_range_separator_spans(
         if _is_period_range_connector(connector):
             separator_spans.append((current[1], following[0]))
     return tuple(separator_spans)
+
+
+def is_period_range_connector(value: str) -> bool:
+    """Return whether ``value`` is a connector reserved for period ranges."""
+
+    return _is_period_range_connector(_normalize(value))
 
 
 def _union_days(intervals: tuple[PeriodInterval, ...] | list[PeriodInterval]) -> int:
@@ -2231,6 +2371,7 @@ __all__ = [
     "analysis_ignored_chinese_phrases",
     "analysis_ignored_english_tokens",
     "explicit_date_range_separator_spans",
+    "is_period_range_connector",
     "is_query_context_clause",
     "period_contract",
     "period_contract_inventory",

@@ -463,6 +463,120 @@ class PhaseTenPeriodContractTests(unittest.TestCase):
         self.assertEqual(protected.outcome, "none")
         self.assertFalse(protected.phrase_matches)
 
+    def test_prefixless_punctuation_period_quantity_requires_clarification(self):
+        for phrase in (
+            "180-day trend",
+            "13_week trend",
+            "4/month report",
+            "2-fortnight trend",
+        ):
+            with self.subTest(phrase=phrase):
+                result = resolve_period_intent(
+                    f"GA4 sessions {phrase}",
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(result.reason_code, "ambiguous_period")
+                self.assertEqual(result.requested_days, 0)
+
+        protected = resolve_period_intent(
+            "GA4 sessions for campaign=180-day-trend",
+            policy=_policy(),
+            today=date(2026, 9, 14),
+        )
+        self.assertEqual(protected.outcome, "none")
+        self.assertFalse(protected.phrase_matches)
+
+        for request in (
+            "GA4 sessions for customer 180-day",
+            "GA4 sessions customer: 180-day",
+            "GA4 sessions for tenant 13_week",
+            "GA4 sessions for 180-day",
+            "GA4 sessions for 13_week",
+            "GA4 sessions for acme-180-day",
+        ):
+            with self.subTest(request=request):
+                qualifier = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+                self.assertEqual(qualifier.outcome, "none")
+                self.assertFalse(qualifier.phrase_matches)
+
+        for request, expected_outcome in (
+            ("GA4 sessions for today", "resolved"),
+            ("GA4 sessions for acme-180-day today", "resolved"),
+            ("GA4 sessions for acme-180-day, today", "resolved"),
+            ("GA4 sessions for 180-day; yesterday", "resolved"),
+            ("GA4 sessions for acme-180-day，今天", "resolved"),
+            ("GA4 sessions for acme-180-day and today", "resolved"),
+            ("GA4 sessions for acme-180-day today by source", "resolved"),
+            (
+                "GA4 sessions for acme-180-day past 7 days group by day",
+                "resolved",
+            ),
+            (
+                "GA4 sessions for acme-180-day 2026-09-01 group by day",
+                "resolved",
+            ),
+            ("GA4 sessions for last-180-days", "needs_clarification"),
+            ("GA4 sessions for 180-day trend", "needs_clarification"),
+            ("GA4 sessions for a 180-day trend", "needs_clarification"),
+            ("GA4 sessions for 13_week trend", "needs_clarification"),
+            ("GA4 sessions for 2-fortnight report", "needs_clarification"),
+        ):
+            with self.subTest(request=request):
+                period = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+                self.assertEqual(period.outcome, expected_outcome)
+
+    def test_dangling_range_context_requires_clarification(self):
+        for request in (
+            "GA4 sessions from 2026-01-01",
+            "GA4 sessions between today",
+            "GA4 sessions 從昨天",
+            "GA4 sessions 2026-01-01 through",
+            "GA4 sessions today to",
+            "GA4 sessions past 7 days through",
+            "GA4 sessions this month to",
+            "GA4 sessions 2026-09-01 to 2026-09-07 through",
+            "GA4 sessions from 2026-01-01 customer breakdown",
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "needs_clarification")
+                self.assertEqual(result.reason_code, "incomplete_date_range")
+                self.assertEqual(result.requested_days, 0)
+
+        for request, expected_days in (
+            ("GA4 sessions 2026-01-01", 1),
+            ("GA4 sessions today", 1),
+            ("GA4 sessions from 2026-09-01 to 2026-09-14", 14),
+            ("GA4 sessions 2026-09-01 to 2026-09-01", 1),
+            ("GA4 sessions today - breakdown by campaign", 1),
+            ("GA4 sessions today — breakdown by campaign", 1),
+        ):
+            with self.subTest(request=request):
+                result = resolve_period_intent(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result.outcome, "resolved")
+                self.assertEqual(result.requested_days, expected_days)
+
     def test_date_range_shaped_filter_values_are_protected(self):
         for request in (
             "GA4 sessions for campaign=2026-01-01~2026-09-01",
@@ -832,6 +946,30 @@ class PhaseTenCapabilityBoundaryTests(unittest.TestCase):
         self.assertEqual(quoted_filter["reason_code"], "ga4_semantic_metric")
         self.assertEqual(quoted_filter["period"]["outcome"], "none")
         self.assertEqual(quoted_filter["period"]["requested_days"], 0)
+
+    def test_period_safety_invariant_blocks_unconsumed_and_dangling_syntax(self):
+        for request, period_reason in (
+            ("GA4 sessions 180-day trend", "ambiguous_period"),
+            ("GA4 sessions from 2026-01-01", "incomplete_date_range"),
+            ("GA4 sessions today through", "incomplete_date_range"),
+            ("GA4 sessions this month to", "incomplete_date_range"),
+            (
+                "GA4 sessions from 2026-01-01 customer breakdown",
+                "incomplete_date_range",
+            ),
+        ):
+            with self.subTest(request=request):
+                result = capability_registry.resolve(
+                    request,
+                    policy=_policy(),
+                    today=date(2026, 9, 14),
+                )
+
+                self.assertEqual(result["resolution"], "needs_clarification")
+                self.assertEqual(result["reason_code"], "ambiguous_period")
+                self.assertEqual(result["next_action"]["type"], "ask_user")
+                self.assertEqual(result["period"]["reason_code"], period_reason)
+                self.assertEqual(result["period"]["requested_days"], 0)
 
     def test_non_default_policy_is_reflected_in_metadata_instructions_and_error(self):
         policy = _policy(max_days=31, time_zone="UTC")
