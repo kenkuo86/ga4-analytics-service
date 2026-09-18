@@ -1,7 +1,8 @@
 # Phase 11 使用分析契約與已確認政策
 
 本文件記錄 repository owner 於 2026-09-18 在實作對話確認的政策。
-11.1 僅提供可執行 contract、schema 與合成案例；尚未開啟收集或部署資源。
+11.1 提供可執行 contract、schema 與合成案例；11.2 接上 per-request 身分與政策查核。
+尚未開啟收集或部署資源。
 
 ## 身分、用途與存取
 
@@ -9,7 +10,9 @@
 - 資料負責人為 repository owner 郭謙；首次 rollout 的原始事件及摘要檢閱限 owner。
   部門彙總建議另以受限 view 提供，群組獨立人數少於 5 時隱藏細分數值；
   此呈現門檻在 11.6 發布前由 owner 確認，目前不對部門開放報表。
-  管理員固有權限仍須於部署前盤點，不能宣稱 dataset IAM 可覆蓋專案繼承權限。
+  Owner 已確認接受既有 GCP 管理員與管理用 SA 的繼承管理存取權例外；
+  不撤銷既有 Owner／Editor，也不額外授予一般同事原始資料讀取權。
+  Dataset IAM 不能覆蓋上層繼承權限，後续 rollout 須重新盤點 drift。
 - Owner 已確認 OAuth allowlist 內所有同事可讀同一集合的全部 active tenants。
   政策代碼 `department-active-tenants-v1`；不是對未登入者或任意 Google Workspace
   帳號開放。保留既有 allowlist、scope、active 狀態及名稱解析邊界。
@@ -85,7 +88,7 @@ timestamp、jsonPayload 及 Logging 欄位名稱轉換，不可直接拿 payload
 
 ## 發布前與後續工作
 
-11.2–11.7 仍需實作與驗證：身分與 tenant 政策查核、summary sanitizer、分類、
+11.3–11.7 仍需實作與驗證：summary sanitizer、分類、
 failure-isolated emission、Cloud Logging／BigQuery 分流、ledger、KPI views、pilot。
 未完成 host 實測不可宣稱 Claude／ChatGPT 行為已驗收。
 

@@ -23,6 +23,7 @@ from oauth_server import jwks_response
 from query_policy import QueryPolicyError
 from semantic_catalog import SemanticCatalogError
 from traffic_summary_report import TrafficSummaryReportError
+from usage_identity import MCPIdentityMiddleware
 
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -47,6 +48,7 @@ if oauth_runtime.config is not None and oauth_runtime.provider is not None:
 mcp = MCPServer(
     "GA4 Analytics Service",
     instructions=SERVER_INSTRUCTIONS,
+    middleware=[MCPIdentityMiddleware(oauth_runtime)],
     **mcp_auth_kwargs,
 )
 

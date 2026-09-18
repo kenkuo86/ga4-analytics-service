@@ -11,6 +11,7 @@ from pydantic import AnyHttpUrl
 
 from auth_config import AUTH_MODE_CLOUD_RUN_IAM, AUTH_MODE_OAUTH, OAuthConfig, get_auth_mode
 from oauth_server import GoogleOAuthAuthorizationServer
+from usage_identity import bind_context, trusted_context
 
 
 @dataclass
@@ -38,7 +39,19 @@ def load_auth_runtime() -> AuthRuntime:
 oauth_runtime = load_auth_runtime()
 
 
-async def require_rest_oauth(request: Request) -> AccessToken | None:
+async def require_rest_oauth(request: Request):
+    """Keep verified identity alive through the entire REST dependency lifetime."""
+    access = await _verify_rest_oauth(request)
+    runtime = oauth_runtime
+    context = trusted_context(
+        access, mode=runtime.mode, transport="rest",
+        required_scope=runtime.config.required_scope if runtime.config else "ga4:read",
+    )
+    with bind_context(context):
+        yield access
+
+
+async def _verify_rest_oauth(request: Request) -> AccessToken | None:
     """Apply the same bearer-token policy to the preserved REST endpoint."""
 
     runtime = oauth_runtime
