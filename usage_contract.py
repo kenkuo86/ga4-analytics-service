@@ -69,7 +69,10 @@ class WireRecord(BaseModel):
 
     schema_version: Literal["1.0"] = SCHEMA_VERSION
     event_time: datetime
-    interaction_id: str
+    interaction_id: Annotated[str, Field(
+        min_length=36, max_length=36,
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    )]
 
     @field_validator("event_time")
     @classmethod
@@ -91,6 +94,14 @@ class WireRecord(BaseModel):
 
 
 class UsageEvent(WireRecord):
+    model_config = ConfigDict(json_schema_extra={
+        "allOf": [{
+            "if": {"properties": {"identity_status": {"const": "verified"}},
+                   "required": ["identity_status"]},
+            "then": {"properties": {"user_id": {"type": "string"}}, "required": ["user_id"]},
+            "else": {"properties": {"user_id": {"type": "null"}}},
+        }],
+    })
     event_name: Literal["analytics_request_completed"] = "analytics_request_completed"
     transport: Transport
     request_kind: RequestKind
@@ -135,7 +146,9 @@ class SummaryAttachment(WireRecord):
     """Accept only already sanitized text, never raw requests or tool results."""
 
     event_name: Literal["analytics_request_summary"] = "analytics_request_summary"
-    request_summary: Annotated[str, Field(min_length=1, max_length=MAX_SUMMARY_CHARACTERS)]
+    request_summary: Annotated[str, Field(
+        min_length=1, max_length=MAX_SUMMARY_CHARACTERS, pattern=r"\S",
+    )]
     request_summary_source: SummarySource
 
     @field_validator("request_summary")
@@ -176,3 +189,10 @@ def bigquery_payload_schema(model: type[WireRecord]) -> list[dict[str, str]]:
         mode = "REPEATED" if kind == "array" else "NULLABLE" if nullable else "REQUIRED"
         fields.append({"name": name, "type": field_type, "mode": mode})
     return fields
+
+
+def wire_json_schema(model: type[WireRecord]) -> dict:
+    """Serialized records include every field, even nullable/defaulted fields."""
+    schema = model.model_json_schema(mode="serialization")
+    schema["required"] = list(schema["properties"])
+    return schema

@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from traffic_summary_report import TRAFFIC_METRICS
 from usage_contract import (
-    SummaryAttachment, UsageEvent, bigquery_payload_schema, tenant_id_for_event,
+    SummaryAttachment, UsageEvent, bigquery_payload_schema, tenant_id_for_event, wire_json_schema,
 )
 
 
@@ -33,7 +33,8 @@ class UsageContractTests(unittest.TestCase):
         self.assertEqual(record.requested_days, 7)
         self.assertIsNone(record.request_summary)
         for model, name in ((UsageEvent, "canonical"), (SummaryAttachment, "summary")):
-            self.assertEqual(json.loads((root / f"{name}.schema.v1.json").read_text()), model.model_json_schema())
+            self.assertEqual(json.loads((root / f"{name}.schema.v1.json").read_text()), wire_json_schema(model))
+            self.assertEqual(set(wire_json_schema(model)["required"]), set(model.model_fields))
             self.assertEqual(json.loads((root / f"{name}.bigquery-payload.v1.json").read_text()), bigquery_payload_schema(model))
 
     def test_tenant_ids_preserve_opaque_contract(self):

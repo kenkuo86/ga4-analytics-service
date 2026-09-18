@@ -1,5 +1,36 @@
 {
   "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "user_id": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "identity_status": {
+            "const": "verified"
+          }
+        },
+        "required": [
+          "identity_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "const": "1.0",
@@ -13,6 +44,9 @@
       "type": "string"
     },
     "interaction_id": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
       "title": "Interaction Id",
       "type": "string"
     },
@@ -362,12 +396,36 @@
     }
   },
   "required": [
+    "schema_version",
     "event_time",
     "interaction_id",
+    "event_name",
     "transport",
     "request_kind",
+    "user_id",
+    "identity_status",
+    "host",
+    "tenant_id",
+    "authorization_scope_ref",
+    "authorization_result",
+    "tool_name",
+    "request_summary",
+    "request_summary_source",
+    "analysis_goal",
+    "analysis_subject",
+    "intent_source",
+    "intent_taxonomy_version",
+    "metrics",
+    "dimensions",
+    "period_type",
+    "requested_days",
+    "comparison_type",
+    "resolution",
     "status",
-    "latency_ms"
+    "latency_ms",
+    "result_row_count",
+    "error_code",
+    "unsupported_reason"
   ],
   "title": "UsageEvent",
   "type": "object"

@@ -46,6 +46,8 @@ Ledger 刪除、到期、identity 中斷或 pipeline gap 均降低 history cover
 ## Wire contract 與隱私邊界
 
 `usage_contract.py` 為程式與 checked-in JSON schema 的共同來源；輸出前重新驗證。
+`wire_json_schema()` 產生完整輸出 schema（所有欄位必填，nullable 值仍可為 null），
+不同於接受預設值的 Pydantic constructor input schema。
 同版本欄位型別固定。破壞性修改須新版本與新 BigQuery view，不改舊表型別。
 BigQuery payload schema **不是** Log Sink 自動匯出的 envelope schema；11.5 須處理
 timestamp、jsonPayload 及 Logging 欄位名稱轉換，不可直接拿 payload schema 建 sink 表。
@@ -73,7 +75,8 @@ timestamp、jsonPayload 及 Logging 欄位名稱轉換，不可直接拿 payload
 | Eligible／authorized funnel | 外部資格名單及持久 connection 台帳 | 目前未提供，不發布比例 |
 | Tool-call／analytics requests | 去重 terminal、transport、tool、kind、status | 180 天；unclassified 另列 |
 | Activation／cohort | Verified 成功 analytics + 持續更新 ledger | 歷史缺口降級；preflight 不算 activation |
-| DAU／WAU／MAU、回訪、sessions | Verified user、event_time、成功 analytics | 180 天；未知 user 排除，日界 Asia/Taipei |
+| DAU／WAU／MAU、回訪 | Verified user、event_time、成功 analytics | 180 天；未知 user 排除，日界 Asia/Taipei |
+| Inferred sessions | 已識別 user 的跨 host／tenant 呼叫與 event_time | 相鄰不超過 30 分鐘歸同組，不限成功 analytics；180 天，未知 user 排除，不等於 host 對話 |
 | W1–W4 retention | 完整 ledger cohort 與 follow-up events | 未成熟或到期標不可量測，不能填零 |
 | 成功、失敗、resolution、latency | status、resolution、latency、受管理 error code | preflight／analytics 分母分開；unknown coverage 另列 |
 | Goals／subjects／metrics／dimensions | 當次可信 taxonomy、catalog／report IDs | unknown 保留、空陣列不猜候選 |
