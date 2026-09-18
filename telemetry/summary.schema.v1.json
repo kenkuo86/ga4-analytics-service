@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "description": "Accept only already sanitized text, never raw requests or tool results.",
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "event_time": {
+      "format": "date-time",
+      "title": "Event Time",
+      "type": "string"
+    },
+    "interaction_id": {
+      "title": "Interaction Id",
+      "type": "string"
+    },
+    "event_name": {
+      "const": "analytics_request_summary",
+      "default": "analytics_request_summary",
+      "title": "Event Name",
+      "type": "string"
+    },
+    "request_summary": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Request Summary",
+      "type": "string"
+    },
+    "request_summary_source": {
+      "enum": [
+        "host_model_generated",
+        "server_generated",
+        "client_generated",
+        "user_input"
+      ],
+      "title": "Request Summary Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_time",
+    "interaction_id",
+    "request_summary",
+    "request_summary_source"
+  ],
+  "title": "SummaryAttachment",
+  "type": "object"
+}

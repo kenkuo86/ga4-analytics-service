@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "event_time": "2026-09-18T01:00:00Z",
+  "interaction_id": "8b812382-12f7-4cc6-b5fd-642e14764355",
+  "event_name": "analytics_request_completed",
+  "transport": "mcp",
+  "request_kind": "analytics",
+  "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "identity_status": "verified",
+  "host": "claude",
+  "tenant_id": "5",
+  "authorization_scope_ref": "department-active-tenants-v1",
+  "authorization_result": "allowed",
+  "tool_name": "traffic_summary",
+  "request_summary": null,
+  "request_summary_source": "unavailable",
+  "analysis_goal": "unknown",
+  "analysis_subject": "traffic",
+  "intent_source": "server_rule",
+  "intent_taxonomy_version": "v1",
+  "metrics": [
+    "total_sessions",
+    "total_users",
+    "new_users",
+    "returning_users"
+  ],
+  "dimensions": [
+    "session_date"
+  ],
+  "period_type": "explicit_range",
+  "requested_days": 7,
+  "comparison_type": "previous_period",
+  "resolution": "supported",
+  "status": "success",
+  "latency_ms": 1350,
+  "result_row_count": 7,
+  "error_code": null,
+  "unsupported_reason": null
+}
