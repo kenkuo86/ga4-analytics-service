@@ -508,6 +508,7 @@ UTC ISO-8601 event time；`event_time` 是處理終止時間，latency 從接收
   "metrics": ["total_sessions", "total_users", "new_users", "returning_users"],
   "dimensions": ["session_date"],
   "period_type": "explicit_range",
+  "requested_days": 7,
   "comparison_type": "previous_period",
   "resolution": "supported",
   "status": "success",
@@ -544,6 +545,16 @@ Telemetry mapping 必須以各 tool 的既有 versioned contract 為單一來源
   preflight 的候選不能描述成實際查詢 metric。需要候選分析時另用明確命名的版本化欄位。
   `period_type`／`comparison_type` 使用受管理 code mapping，無可靠證據用 `unknown`，
   明確沒有比較才用 `none`；明確日期不能自行猜為「上週」。
+- `requested_days` 為正 integer 或 null（BigQuery nullable INT64），表示本次 request 中
+  可可靠解析的 explicit periods 聯集天數，包含起訖日；與 `period_type` 分開保存於
+  180 天 canonical event，不依賴短期 summary。Data tools／REST 的有效單一區間取
+  `(end_date - start_date).days + 1`；preflight 沿用 Phase 10 的 normalized explicit periods
+  與聯集計數，重疊／相鄰區段不重複計日。不包含固定 implicit previous comparison，
+  也不是 actual scan days；`all_available_data` metric 不改變本次需求天數。
+  只使用本次正常處理已取得的可靠期間資訊，不跨 tool call 回推、不為 telemetry 額外查詢
+  或另建 parser。未提供期間、解析不完整／無效、驗證前拒絕而尚未取得日期時為 null；
+  不把 `PeriodIntent.requested_days` 的預設 0 當成已解析需求。若已可靠算出天數後才因
+  policy 超限而 denied，仍保留該天數，不能截成上限；無可靠計數則保持 null。
 - `resolution` 固定 `supported | needs_clarification | unsupported | unknown`，與執行
   `status=success | failure | denied | unsupported | needs_clarification` 分開。
   支援需求仍可能執行失敗；preflight supported 的 success 不算 activation。Tenant 候選待確認
@@ -709,12 +720,30 @@ REST user 可 activated 而沒有 MCP tried，funnel 應按 transport 揭露非�
 | Failure rate | analytics status=failure／全部 canonical analytics attempts；另報 denied、unsupported、needs-clarification 占比，不能將它們當 backend failure。 |
 | Top analysis goals／subjects | 按 request_kind 分開，以去重 interaction 統計 taxonomy 分布，保留 unsupported、unknown 及 intent_source。 |
 | Top metrics／dimensions | 以每個 canonical analytics request 中每個已驗證 ID 至多一次計數；不依結果列數加權，preflight 候選另報。 |
-| Top period／comparison patterns | 依標準化 period_type／comparison_type 分布，區分 explicit／implicit／unknown，不以實際掃描範圍替代需求期間。 |
+| Top period／comparison patterns | 依 period_type、requested_days 與 comparison_type 分布，分開 preflight／analytics；保留 null／unknown coverage。以 requested_days 區分 7／90 天等需求長度，固定 implicit comparison 另計模式，不猜原始相對措辭或以實際掃描範圍替代需求期間。 |
 | Top unsupported reasons | unsupported events 的受管理 reason code 分布，分開 preflight 與 data analytics。 |
 | Latency／error categories | 依 tool、transport、status 的 p50／p95 latency 及 auth、tenant、validation、policy、timeout、backend／unknown error code 分布；不保存 exception 原文。 |
 
 Tool-call、analytics request、inferred session 為三種獨立單位，dashboard／weekly summary
 需明列。來源覆蓋只限實際送達服務的需求；不能用這些排名推論所有 host 對話或全體未使用者。
+
+#### KPI data sufficiency check
+
+11.1 contract 與 11.6 KPI views 共同維護下表；新增或修改任何指標／欄位時，必須先確認
+「資料從哪來、保存多久、缺失時怎麼辦」。沿用上方 KPI 分母，不另定義一套計數；
+所需歷史超出保存窗口時縮短報告範圍或標示不可量測，不將缺失當作 0，也不從摘要補造。
+
+| 指標／用途 | 必要資料與來源 | 保存／缺失處理 |
+| --- | --- | --- |
+| Eligible／authorized funnel | 外部資格名單、生效時間、持久 connection lifecycle 與穩定 user mapping | 發布前確認來源保存政策及覆蓋的報告期間；缺任一分母就不報該轉換率。 |
+| Tried／tool-call／analytics request counts | MCP dispatch／validation outcome → transport、tool_name、request_kind、status、error_code、interaction_id；tried 另需 verified user，排除 invalid schema／auth denial | Canonical 180 天；無法辨識的呼叫另列 unclassified，不推測 tool 或有效呼叫。 |
+| Activated users／累積 activation | Verified user 的成功 analytics event → ledger first_success_at、measurement_version | Ledger 獨立核准政策；歷史不連續時依 history coverage 降級。 |
+| DAU／WAU／MAU、active days、requests per user、repeat usage、inferred session | Request context／canonical event 的 user_id、identity_status、event_time、request_kind、status、interaction_id | Canonical 180 天；未知 user 不算獨立人數或 session。日／週／月及 session 邊界需完整資料，窗口截斷需揭露。 |
+| W1–W4 retention | Ledger cohort + follow-up 成功 analytics events | 同時滿足 ledger policy 與 180 天事件窗口；未成熟、缺漏或已到期 cohort 不計為零。 |
+| Successful requests、resolution／failure rates、unsupported reasons、latency／errors | Capability／query outcome → resolution、status、unsupported_reason、error_code、latency_ms，依 request_kind 去重計算 | Canonical 180 天；未知 resolution／error 另列 coverage，不混淆拒絕與 backend failure。 |
+| Top goals／subjects／metrics／dimensions | 已驗證 taxonomy／hint、catalog／report contract → analysis_goal、analysis_subject、intent_source、metrics、dimensions | Canonical 180 天；未知分類保留 unknown，缺 ID 為空陣列，不拿 candidates 或 labels 當實際查詢 ID。 |
+| Top period／comparison patterns | 本次 normalized explicit periods／日期參數與 report strategy → period_type、requested_days、comparison_type | Canonical 180 天；summary 到期後仍可分辨期間長度；不能還原原始措辭則保持 explicit_range／unknown。 |
+| 摘要檢閱（非 KPI 分母） | Redacted summary attachment，以 interaction_id 關聯 | 30 天；到期或缺失不影響上列結構化 KPI，不保留長期文字副本。 |
 
 #### Reliability, rollout and validation
 
@@ -768,6 +797,12 @@ Tool-call、analytics request、inferred session 為三種獨立單位，dashboa
   label、SQL alias 或摘要文字替代。明確日期恰好落於上週及一般任意區間，都保持
   explicit_range；沒有本次呼叫的可靠 relative-period／goal 證據時，不從日期、固定比較
   或其他 tool call 倒推原始意圖。Report comparison 可記錄，但不能把它當成使用者 goal。
+- KPI data sufficiency check 與文件範例須作為固定驗收：逐項比對來源契約、型別及
+  所需歷史；移除 summary 後，兩筆 period_type 同為 explicit_range、requested_days
+  分別為 7／90 的事件仍可正確分組，不能以 result_row_count 代替需求天數。
+  覆蓋單日=1、重疊 explicit periods 聯集、implicit previous 不加倍、all_available_data
+  不改需求天數、可靠超限天數不截斷，以及未知／無效期間為 null（非預設 0）；文件
+  example、classifier／serializer 與 KPI views 使用同一語意，保存到期時依上表降級。
 - 保存期限 fixtures 覆蓋同一 user 第 1 天成功、第 181 天回訪：第 1 天原始 event 到期後，
   ledger 仍保留首次時間，不重算新 activation；重送不加人數、late event 修正首次時間與
   cohort。Ledger 缺失／刪除／到期、identity 斷裂及 pipeline gap 必須觸發 history coverage
