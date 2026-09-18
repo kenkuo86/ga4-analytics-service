@@ -410,3 +410,9 @@ OAuth client ID 到 host enum 的 JSON mapping；未設定時 host 為 other。
 目前沒有 key 時仍可正常分析，但 user ID 為 null；`USAGE_ENABLED=true` 則要求 key。
 Telemetry 關閉不撤掉 auth／tenant boundary。IAM 模式沿用外層 Cloud Run 保護，
 不把 header、runtime SA 或共用 client ID 當作人。離線 CLI 不建立 public request context。
+
+11.3 的 `usage_classification.py` 僅使用可信 catalog／report 與 Phase 10 period metadata，
+preflight candidates 不算實際 metrics，explicit dates 不倒推相對措辭或分析 goal。
+摘要採保守詞彙 allowlist：email／電話遮罩，credential／SQL／URL 或未知自由文字
+直接丟棄；最多 500 Unicode 字元。未提供文字時可產生不含客戶名稱的結構化摘要。
+本模組尚待 11.4 接線，optional tool hints／summary 還未改變公開 schema。
