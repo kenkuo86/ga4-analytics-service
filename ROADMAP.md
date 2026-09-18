@@ -495,7 +495,7 @@ UTC ISO-8601 event time；`event_time` 是處理終止時間，latency 從接收
   "user_id": "pseudonymous-stable-id",
   "identity_status": "verified",
   "host": "claude",
-  "tenant_id": 5,
+  "tenant_id": "5",
   "authorization_scope_ref": "department-policy-v1",
   "authorization_result": "allowed",
   "tool_name": "traffic_summary",
@@ -534,8 +534,12 @@ Telemetry mapping 必須以各 tool 的既有 versioned contract 為單一來源
 - `transport` 固定 `mcp | rest`；`host` 固定 `chatgpt | claude | web_app | other`；
   `identity_status` 固定 `verified | unavailable`；authorization result 固定
   `allowed | denied | unknown`。Scope reference 是受管理政策代碼，不是 token 或完整 ACL。
-- 字串識別欄位不得有時變成數字／物件；`tenant_id` 固定 integer 或 null，user、tool、scope
+- 字串識別欄位不得有時變成數字／物件；`tenant_id` 固定 string 或 null，BigQuery 對應
+  nullable STRING，沿用已解析 registry 的字串 ID；它是 opaque identifier，不做數值轉換、
+  trim 或大小寫正規化，`"5"`、`"005"`、`"tenant-a"` 均原樣保留且彼此不同。User、tool、scope
   reference 無可信資訊時為 null。Preflight、未解析 tenant 或驗證前拒絕不得猜測 tenant ID。
+  若來源不是字串或缺失，telemetry 寫 null 並記錄不含原值的型別／缺失品質計數，不以
+  `str()` 或 `int()` 猜測轉型、不改變 analytics 結果；registry 清理／遷移另行規劃。
 - `metrics`／`dimensions` 固定為去重的 string arrays，僅記錄已驗證 ID，未知為空陣列；
   preflight 的候選不能描述成實際查詢 metric。需要候選分析時另用明確命名的版本化欄位。
   `period_type`／`comparison_type` 使用受管理 code mapping，無可靠證據用 `unknown`，
@@ -753,6 +757,9 @@ Tool-call、analytics request、inferred session 為三種獨立單位，dashboa
   scope 與 tenant ID 來自可信 context。缺失 identity 時人數／留存明確排除並顯示 coverage。
 - 同版本欄位型別、nullability、enum、schema migration 與 BigQuery ingestion 相容性有
   contract tests；匿名拒絕、零列成功、多 metric 結果及尚未解析 tenant 都有 fixture。
+  Tenant ID 須從 resolver／report 到 event／BigQuery nullable STRING 保持字串契約，覆蓋
+  `"5"`、`"005"`、`"tenant-a"`、null 及非字串來源；不得合併不同 ID、將 null 寫成 `"None"`，
+  或讓 telemetry 型別問題改變主查詢結果；文件範例亦須與既有 tenant contract fixtures 一致。
 - Funnel／KPI fixtures 驗證 external denominator 缺失、跨日／週界、W4 未成熟 cohort、
   REST 非階梯 funnel、30 分鐘 inferred session，以及 tool-call／analytics／session
   三種計數；沒有完整對話資料時不能宣稱量測了完整對話數。
