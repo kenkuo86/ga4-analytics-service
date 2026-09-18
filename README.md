@@ -400,5 +400,13 @@ python -m unittest discover -s tests -v
 
 使用分析的已確認政策與資料契約見 [docs/usage-privacy.md](docs/usage-privacy.md)。
 `usage_contract.py`、`telemetry/*.v1.json` 提供版本化 canonical event／摘要附件 schema
-與合成範例；此基礎尚未接入 MCP／REST、不會收集資料或建立雲端資源。
+與合成範例。MCP／REST 已將每次驗證後的身分傳入隔離 request context，
+並在 registry／data client 建立前查核共用部門存取政策；尚未開啟收集或建立雲端資源。
 資料目標專案為 `ga4-reports-dev`，canonical／summary 保存期限分別為 180／30 天。
+
+啟用 usage 前需從 Secret Manager 注入固定 `USAGE_IDENTITY_KEY`（至少 32 隨機 bytes 的
+base64），不可重用 token signing key 或每次啟動重生。`USAGE_CLIENT_HOSTS` 為受管理的
+OAuth client ID 到 host enum 的 JSON mapping；未設定時 host 為 other。
+目前沒有 key 時仍可正常分析，但 user ID 為 null；`USAGE_ENABLED=true` 則要求 key。
+Telemetry 關閉不撤掉 auth／tenant boundary。IAM 模式沿用外層 Cloud Run 保護，
+不把 header、runtime SA 或共用 client ID 當作人。離線 CLI 不建立 public request context。

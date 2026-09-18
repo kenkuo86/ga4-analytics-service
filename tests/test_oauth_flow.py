@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import time
 import unittest
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.hazmat.primitives import serialization
@@ -67,6 +68,46 @@ class FakeGoogleIdentity:
 
 
 class OAuthFlowTests(unittest.TestCase):
+    def test_usage_identity_reaches_real_mcp_rest_and_refreshed_token(self):
+        from usage_identity import IdentitySettings, current_context
+        config = IdentitySettings(b"a" * 32, {"claude-web-test": "claude"})
+        code = self._authorize_and_consent()
+        tokens = self._exchange_code(code).json()
+        headers = {**self.headers, "authorization": f"Bearer {tokens['access_token']}",
+                   "accept": "application/json, text/event-stream"}
+        initialized = self.client.post("/mcp", headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "spoofed-host", "version": "1"}},
+        })
+        headers["mcp-session-id"] = initialized.headers["mcp-session-id"]
+        self.client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+        seen = []
+        def capture(*args, **kwargs):
+            seen.append(current_context.get())
+            return {"status": "ok"}
+        with patch("usage_identity.settings", config), patch("mcp_server.get_ga4_capability_resolution", capture), patch("main.get_traffic_summary", capture):
+            call = self.client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "get_ga4_capabilities", "arguments": {}}})
+            self.assertEqual(call.status_code, 200, call.text)
+            rest = self.client.get("/traffic-summary", headers=headers, params={
+                "customer_name": "test", "start_date": "2026-09-01", "end_date": "2026-09-07"})
+            self.assertEqual(rest.status_code, 200, rest.text)
+            refreshed = self.client.post("/token", headers=self.headers, data={
+                "grant_type": "refresh_token", "client_id": "claude-web-test", "refresh_token": tokens["refresh_token"]})
+            self.assertEqual(refreshed.status_code, 200, refreshed.text)
+            headers["authorization"] = f"Bearer {refreshed.json()['access_token']}"
+            call = self.client.post("/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": "get_ga4_capabilities", "arguments": {}}})
+            self.assertEqual(call.status_code, 200, call.text)
+        self.assertEqual(len(seen), 3)
+        self.assertTrue(all(ctx and ctx.authorized and ctx.user_id for ctx in seen))
+        self.assertEqual(len({ctx.user_id for ctx in seen}), 1)
+        self.assertEqual(len({ctx.interaction_id for ctx in seen}), 3)
+        self.assertEqual([ctx.transport for ctx in seen], ["mcp", "rest", "mcp"])
+        self.assertTrue(all(ctx.host == "claude" for ctx in seen))
+        self.assertIsNone(current_context.get())
+
     @classmethod
     def setUpClass(cls):
         assert oauth_runtime.provider is not None

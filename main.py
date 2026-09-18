@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from capability_registry import capability_registry
 from oauth_auth import require_rest_oauth
+from usage_identity import record_resolved_tenant, require_tenant_access
 from query_policy import (
     QUERY_PROVENANCE_SCHEMA_VERSION,
     PreparedQuery,
@@ -82,6 +83,7 @@ class TenantResolutionError(TenantContextErrorMixin, ValueError):
 
 
 def get_bigquery_client():
+    require_tenant_access()
     credentials, detected_project = google.auth.default(
         scopes=[
             "https://www.googleapis.com/auth/cloud-platform",
@@ -107,6 +109,7 @@ def get_tenant_config(
     根據 registry 中的正式名稱或 exact managed alias 取得 GA4 BigQuery 的位置。
     """
 
+    require_tenant_access()
     row, requested_name, resolved_name, match_type = _resolve_tenant_record(
         client,
         customer_name,
@@ -147,6 +150,7 @@ def get_tenant_config(
             match_type=match_type,
         )
 
+    record_resolved_tenant(row.tenant_id)
     return {
         "tenant_id": row.tenant_id,
         "tenant_name": row.tenant_name,
@@ -1056,6 +1060,7 @@ def traffic_summary(
         )
     except QueryPolicyError as error:
         status_code = {
+            "tenant_access_denied": 403,
             "daily_query_quota_exceeded": 429,
             "query_cost_estimate_failed": 503,
             "query_timeout": 504,
