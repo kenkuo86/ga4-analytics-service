@@ -115,6 +115,7 @@ def get_tenant_config(
         customer_name,
     )
     tenant_status = (row.status or "").strip().lower()
+    record_resolved_tenant(row.tenant_id, analytics_allowed=tenant_status == "active")
 
     if tenant_status != "active":
         raise TenantResolutionError(
@@ -150,7 +151,6 @@ def get_tenant_config(
             match_type=match_type,
         )
 
-    record_resolved_tenant(row.tenant_id)
     return {
         "tenant_id": row.tenant_id,
         "tenant_name": row.tenant_name,
@@ -442,6 +442,7 @@ def get_customer_status(customer_name: str) -> dict:
     )
     tenant_status = (row.status or "").strip().lower()
     analytics_available = tenant_status == "active" and bool(row.project_id)
+    record_resolved_tenant(row.tenant_id, analytics_allowed=tenant_status == "active")
     return {
         "status": "customer_found",
         "customer_name": row.tenant_name,

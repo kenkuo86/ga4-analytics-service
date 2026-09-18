@@ -122,12 +122,12 @@ def require_tenant_access() -> None:
         raise QueryPolicyError("tenant_access_denied", "目前身分沒有客戶資料存取權限。")
 
 
-def record_resolved_tenant(tenant_id: object) -> None:
+def record_resolved_tenant(tenant_id: object, *, analytics_allowed: bool = True) -> None:
     context = current_context.get()
     if context is None:
         return
     require_tenant_access()
-    context.authorization_result = "allowed"
+    context.authorization_result = "allowed" if analytics_allowed else "denied"
     try:
         context.tenant_id, context.tenant_id_quality = tenant_id_for_event(tenant_id)
     except Exception:

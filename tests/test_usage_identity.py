@@ -80,6 +80,22 @@ class IdentityTests(unittest.TestCase):
                 main.get_bigquery_client()
         credentials.assert_not_called()
 
+    def test_resolved_inactive_and_unavailable_tenants_remain_observable(self):
+        import main
+        for status, project in (("inactive", "project"), ("active", None), ("active", "project")):
+            row = SimpleNamespace(tenant_id="005", tenant_name="test", status=status, project_id=project, ec=False)
+            ctx = trusted_context(token(), mode="oauth", transport="mcp")
+            with bind_context(ctx), patch("main._resolve_tenant_record", return_value=(row, "test", "test", "exact")), patch("main.get_bigquery_client"):
+                main.get_customer_status("test")
+                self.assertEqual(ctx.tenant_id, "005")
+                self.assertEqual(ctx.authorization_result, "allowed" if status == "active" else "denied")
+                ctx.tenant_id = None
+                try:
+                    main.get_tenant_config(None, "test")
+                except main.TenantResolutionError:
+                    pass
+                self.assertEqual(ctx.tenant_id, "005")
+
 
 class ConcurrentIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def test_middleware_uses_each_http_user_and_resets_on_exceptions(self):
