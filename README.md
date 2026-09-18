@@ -395,3 +395,10 @@ python -m unittest discover -s tests -v
 ```
 
 測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection、traffic summary report contract，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。
+
+## Phase 11 使用分析契約
+
+使用分析的已確認政策與資料契約見 [docs/usage-privacy.md](docs/usage-privacy.md)。
+`usage_contract.py`、`telemetry/*.v1.json` 提供版本化 canonical event／摘要附件 schema
+與合成範例；此基礎尚未接入 MCP／REST、不會收集資料或建立雲端資源。
+資料目標專案為 `ga4-reports-dev`，canonical／summary 保存期限分別為 180／30 天。

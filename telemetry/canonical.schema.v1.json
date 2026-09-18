@@ -1,0 +1,432 @@
+{
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "user_id": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "identity_status": {
+            "const": "verified"
+          }
+        },
+        "required": [
+          "identity_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "event_time": {
+      "format": "date-time",
+      "title": "Event Time",
+      "type": "string"
+    },
+    "interaction_id": {
+      "maxLength": 36,
+      "minLength": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "title": "Interaction Id",
+      "type": "string"
+    },
+    "event_name": {
+      "const": "analytics_request_completed",
+      "default": "analytics_request_completed",
+      "title": "Event Name",
+      "type": "string"
+    },
+    "transport": {
+      "enum": [
+        "mcp",
+        "rest"
+      ],
+      "title": "Transport",
+      "type": "string"
+    },
+    "request_kind": {
+      "enum": [
+        "analytics",
+        "capability_preflight",
+        "discovery",
+        "unclassified"
+      ],
+      "title": "Request Kind",
+      "type": "string"
+    },
+    "user_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User Id"
+    },
+    "identity_status": {
+      "default": "unavailable",
+      "enum": [
+        "verified",
+        "unavailable"
+      ],
+      "title": "Identity Status",
+      "type": "string"
+    },
+    "host": {
+      "default": "other",
+      "enum": [
+        "chatgpt",
+        "claude",
+        "web_app",
+        "other"
+      ],
+      "title": "Host",
+      "type": "string"
+    },
+    "tenant_id": {
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tenant Id"
+    },
+    "authorization_scope_ref": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_.:-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Authorization Scope Ref"
+    },
+    "authorization_result": {
+      "default": "unknown",
+      "enum": [
+        "allowed",
+        "denied",
+        "unknown"
+      ],
+      "title": "Authorization Result",
+      "type": "string"
+    },
+    "tool_name": {
+      "anyOf": [
+        {
+          "enum": [
+            "customer_lookup",
+            "list_available_customers",
+            "get_ga4_capabilities",
+            "search_ga4_metrics",
+            "query_ga4",
+            "traffic_summary"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tool Name"
+    },
+    "request_summary": {
+      "default": null,
+      "title": "Request Summary",
+      "type": "null"
+    },
+    "request_summary_source": {
+      "const": "unavailable",
+      "default": "unavailable",
+      "title": "Request Summary Source",
+      "type": "string"
+    },
+    "analysis_goal": {
+      "default": "unknown",
+      "enum": [
+        "overview",
+        "comparison",
+        "trend",
+        "breakdown",
+        "ranking",
+        "diagnosis",
+        "recommendation",
+        "data_lookup",
+        "unknown"
+      ],
+      "title": "Analysis Goal",
+      "type": "string"
+    },
+    "analysis_subject": {
+      "default": "unknown",
+      "enum": [
+        "traffic",
+        "acquisition",
+        "campaign",
+        "content",
+        "landing_page",
+        "audience",
+        "conversion",
+        "engagement",
+        "cross_source",
+        "unknown"
+      ],
+      "title": "Analysis Subject",
+      "type": "string"
+    },
+    "intent_source": {
+      "default": "unknown",
+      "enum": [
+        "server_rule",
+        "host_model_hint",
+        "offline_classifier",
+        "manual_review",
+        "unknown"
+      ],
+      "title": "Intent Source",
+      "type": "string"
+    },
+    "intent_taxonomy_version": {
+      "const": "v1",
+      "default": "v1",
+      "title": "Intent Taxonomy Version",
+      "type": "string"
+    },
+    "metrics": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9_.:-]+$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Metrics",
+      "type": "array"
+    },
+    "dimensions": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9_.:-]+$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Dimensions",
+      "type": "array"
+    },
+    "period_type": {
+      "default": "unknown",
+      "enum": [
+        "explicit_range",
+        "relative_window",
+        "multiple_periods",
+        "unknown"
+      ],
+      "title": "Period Type",
+      "type": "string"
+    },
+    "requested_days": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 9223372036854775807,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Requested Days"
+    },
+    "comparison_type": {
+      "default": "unknown",
+      "enum": [
+        "none",
+        "previous_period",
+        "explicit_periods",
+        "unknown"
+      ],
+      "title": "Comparison Type",
+      "type": "string"
+    },
+    "resolution": {
+      "default": "unknown",
+      "enum": [
+        "supported",
+        "needs_clarification",
+        "unsupported",
+        "unknown"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "failure",
+        "denied",
+        "unsupported",
+        "needs_clarification"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "latency_ms": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Latency Ms",
+      "type": "integer"
+    },
+    "result_row_count": {
+      "anyOf": [
+        {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Result Row Count"
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "enum": [
+            "authentication_required",
+            "invalid_token",
+            "insufficient_scope",
+            "tenant_access_denied",
+            "invalid_schema",
+            "unknown_tool",
+            "invalid_customer_name",
+            "customer_name_too_broad",
+            "tenant_confirmation_required",
+            "ambiguous_tenant",
+            "tenant_not_found",
+            "tenant_inactive",
+            "data_unavailable",
+            "invalid_date_format",
+            "invalid_date_range",
+            "invalid_period",
+            "date_before_available_range",
+            "date_range_too_large",
+            "future_date_not_allowed",
+            "query_cost_estimate_failed",
+            "query_cost_limit_exceeded",
+            "daily_query_quota_exceeded",
+            "invalid_semantic_profile",
+            "unsupported_metric",
+            "metric_definition_conflict",
+            "semantic_profile_required",
+            "invalid_tenant_routing",
+            "invalid_metric_definition",
+            "invalid_metric_request",
+            "too_many_metrics",
+            "invalid_report_contract",
+            "timeout",
+            "backend_error",
+            "unknown_error"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Code"
+    },
+    "unsupported_reason": {
+      "anyOf": [
+        {
+          "enum": [
+            "external_source_not_available",
+            "unsupported_metric",
+            "metric_definition_conflict",
+            "period_not_supported",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Unsupported Reason"
+    }
+  },
+  "required": [
+    "schema_version",
+    "event_time",
+    "interaction_id",
+    "event_name",
+    "transport",
+    "request_kind",
+    "user_id",
+    "identity_status",
+    "host",
+    "tenant_id",
+    "authorization_scope_ref",
+    "authorization_result",
+    "tool_name",
+    "request_summary",
+    "request_summary_source",
+    "analysis_goal",
+    "analysis_subject",
+    "intent_source",
+    "intent_taxonomy_version",
+    "metrics",
+    "dimensions",
+    "period_type",
+    "requested_days",
+    "comparison_type",
+    "resolution",
+    "status",
+    "latency_ms",
+    "result_row_count",
+    "error_code",
+    "unsupported_reason"
+  ],
+  "title": "UsageEvent",
+  "type": "object"
+}

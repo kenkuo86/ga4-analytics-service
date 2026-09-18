@@ -1,5 +1,6 @@
 google-cloud-bigquery
 fastapi
+pydantic>=2.11,<3
 uvicorn
 mcp[cli]==2.1.0
 PyJWT[crypto]>=2.10,<3

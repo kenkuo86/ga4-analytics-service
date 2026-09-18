@@ -1,0 +1,152 @@
+[
+  {
+    "name": "schema_version",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "event_time",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "interaction_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "event_name",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "transport",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "request_kind",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "user_id",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "identity_status",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "host",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "tenant_id",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "authorization_scope_ref",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "authorization_result",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "tool_name",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "request_summary",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "request_summary_source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "analysis_goal",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "analysis_subject",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "intent_source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "intent_taxonomy_version",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "metrics",
+    "type": "STRING",
+    "mode": "REPEATED"
+  },
+  {
+    "name": "dimensions",
+    "type": "STRING",
+    "mode": "REPEATED"
+  },
+  {
+    "name": "period_type",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "requested_days",
+    "type": "INT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "comparison_type",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "resolution",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "status",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "latency_ms",
+    "type": "INT64",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "result_row_count",
+    "type": "INT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "error_code",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "unsupported_reason",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  }
+]
