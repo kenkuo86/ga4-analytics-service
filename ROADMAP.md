@@ -479,8 +479,9 @@ tenant authorization 依賴應先回報，不能以放寬權限或共用 user ID
 
 #### Versioned usage event contract
 
-第一版 `schema_version=1.0`，以下為已完成查詢的示意，實際 metric IDs 以 catalog 為準；
-不新增示例用的 `analyze_ga4` tool。所有 event 都有 schema version、server interaction ID、
+第一版 `schema_version=1.0`，以下示例為 `traffic_summary` 收到 `start_date=2026-09-07`、
+`end_date=2026-09-13` 且未提供 intent hint 的成功呼叫。不新增 `analyze_ga4` tool。
+所有 event 都有 schema version、server interaction ID、
 UTC ISO-8601 event time；`event_time` 是處理終止時間，latency 從接收時計算。
 
 ```json
@@ -500,13 +501,13 @@ UTC ISO-8601 event time；`event_time` 是處理終止時間，latency 從接收
   "tool_name": "traffic_summary",
   "request_summary": null,
   "request_summary_source": "unavailable",
-  "analysis_goal": "comparison",
+  "analysis_goal": "unknown",
   "analysis_subject": "traffic",
   "intent_source": "server_rule",
   "intent_taxonomy_version": "v1",
-  "metrics": ["sessions", "users", "new_users", "returning_users"],
+  "metrics": ["total_sessions", "total_users", "new_users", "returning_users"],
   "dimensions": ["session_date"],
-  "period_type": "previous_week",
+  "period_type": "explicit_range",
   "comparison_type": "previous_period",
   "resolution": "supported",
   "status": "success",
@@ -516,6 +517,19 @@ UTC ISO-8601 event time；`event_time` 是處理終止時間，latency 從接收
   "unsupported_reason": null
 }
 ```
+
+Telemetry mapping 必須以各 tool 的既有 versioned contract 為單一來源，不另維護一份
+推測的 ID 清單。`query_ga4` 的 metrics 取已解析 catalog metric IDs；`traffic_summary`
+（含 REST）的 metrics 取 `traffic_summary_report.py` 的 `TRAFFIC_METRICS[*].metric_id`，
+不用顯示 label 或自行縮寫。維度依 catalog ID 與 report 的明確來源映射；本例 `session_date`
+對應 report date basis。未有映射的值保持空陣列／unknown，不用臆測值填滿 schema。
+
+本例的 `period_type=explicit_range` 只表示本次呼叫收到明確日期；即使恰好等於上週，
+也不能改寫成 relative window。`comparison_type=previous_period` 來自 report 固定的
+`immediately_preceding_equal_length` strategy，只代表實際報表比較方式，不證明使用者
+要求比較；因此沒有可靠 goal 證據時 `analysis_goal=unknown`。`analysis_subject=traffic`
+可由 tool contract 判定，故依既有混合 unknown 規則保留 `intent_source=server_rule`。
+文字摘要不充當 resolved period 或 intent hint 的替代證據。
 
 - `transport` 固定 `mcp | rest`；`host` 固定 `chatgpt | claude | web_app | other`；
   `identity_status` 固定 `verified | unavailable`；authorization result 固定
@@ -575,8 +589,8 @@ dashboard 欄位。下述最小化 activation ledger 是獨立核准的保存類
   "event_name": "analytics_request_summary",
   "event_time": "2026-09-18T01:00:00Z",
   "interaction_id": "8b812382-12f7-4cc6-b5fd-642e14764355",
-  "request_summary": "查看上週 GA4 流量並與前期比較",
-  "request_summary_source": "host_model_generated"
+  "request_summary": "查詢 2026-09-07 至 2026-09-13 的 GA4 流量摘要",
+  "request_summary_source": "server_generated"
 }
 ```
 
@@ -643,7 +657,7 @@ Ledger 只保存首次時間，不保留後續活動：W1–W4 留存仍需完�
 2. `capability_registry.py` 的 resolution、reason_code、next_action、registry version 與
    metric candidates 可提供支援邊界及主題候選；capability resolution 不直接等於 goal。
    `semantic_catalog.py` 的 metric ID、category、main_metric、dimensions、model、profile
-   與 catalog version 可映射 subject，維度必須用 catalog 已定義 ID，不能任意創造。
+   與 catalog version 可映射 subject；固定 report 使用前述 tool contract mapping，不能任意創造 ID。
 3. `main.py` 的 `prepared_metrics`／`PreparedQuery` 是既有 resolved query plan 的可用部分，
    可取實際 metric、date_scope、日期與結果狀態；目前沒有通用的 goal、comparison 或任意
    group-by intent 欄位。固定 report comparison、daily series 是結果形狀，不足以斷言使用者
@@ -742,6 +756,11 @@ Tool-call、analytics request、inferred session 為三種獨立單位，dashboa
 - Funnel／KPI fixtures 驗證 external denominator 缺失、跨日／週界、W4 未成熟 cohort、
   REST 非階梯 funnel、30 分鐘 inferred session，以及 tool-call／analytics／session
   三種計數；沒有完整對話資料時不能宣稱量測了完整對話數。
+- Telemetry mapping／文件範例與既有 tool contract 有一致性驗收：traffic summary metrics
+  必須等於 `TRAFFIC_METRICS` IDs，semantic metrics／dimensions 由 catalog 驗證；不得以
+  label、SQL alias 或摘要文字替代。明確日期恰好落於上週及一般任意區間，都保持
+  explicit_range；沒有本次呼叫的可靠 relative-period／goal 證據時，不從日期、固定比較
+  或其他 tool call 倒推原始意圖。Report comparison 可記錄，但不能把它當成使用者 goal。
 - 保存期限 fixtures 覆蓋同一 user 第 1 天成功、第 181 天回訪：第 1 天原始 event 到期後，
   ledger 仍保留首次時間，不重算新 activation；重送不加人數、late event 修正首次時間與
   cohort。Ledger 缺失／刪除／到期、identity 斷裂及 pipeline gap 必須觸發 history coverage
