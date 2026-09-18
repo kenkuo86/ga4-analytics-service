@@ -382,6 +382,451 @@ query token 或每位使用者累積期間限制。單一 tool call 的日期與
 - 文件及 consent page 清楚揭露：單次 tool call 限制由服務端強制，完整使用者需求限制在 PoC 階段依賴 connector instructions 與 host behavior。
 - Phase 4 既有 semantic、traffic summary、REST 與 MCP 日期／成本測試持續通過。
 
+### Phase 11: GA Analytics 內部使用分析／Usage Telemetry
+
+Status: Planned
+
+Dependencies: Foundation 1 的 per-user identity／tenant authorization 前置補強；已完成的
+Phases 4–5、7、10 提供 query outcome、capability、tenant 與 period metadata。
+Cloud Logging → BigQuery routing 與使用者母體資料尚待建立及驗證。
+
+#### Goal
+
+在部門開放後，量測有多少同事開始使用、使用頻率及留存，以及常見分析方式、指標、維度、
+期間、主題與尚未滿足的需求，供 capability、tool design 與使用體驗改善。主要 activation
+定義為「至少成功完成一次 GA Analytics 分析的獨立使用者」。
+
+本功能是新的產品使用分析能力，不等同 Phase 6 的 opt-in query provenance，也不只是在
+既有營運項目監控 BigQuery 費用。故置於已完成的 Phase 10 之後，獨立拆分相依工作；
+不改變 Phase 4–10 範圍，且不以尚未完成的 catalog CI 或 IAM 自動化為必要前置。
+
+#### Existing architecture and prerequisites
+
+1. `oauth_server.py` 已由 Google OIDC 取得穩定 `sub`，簽發 MCP token，並在驗證後回傳
+   `AccessToken.subject`；不是缺少 OAuth 登入功能。但 `mcp_server.py` 的 tool handlers
+   尚未傳遞 subject，`main.py` REST dependency 只驗證 token、未將回傳 identity 傳入
+   analytics context。`tenant_context.py` 目前只追蹤名稱解析，不含 user identity 或 tenant ID。
+   實作前須驗證 MCP SDK context 與 REST identity 的安全傳遞、跨並行 request 隔離及 refresh
+   前後識別一致性。正式對部門開放前，所有 analytics 入口必須有可驗證的 per-user subject。
+2. `cloud-run-iam` 模式由外層 IAM 保護，`require_rest_oauth` 回傳 `None`；目前不能推定
+   app 已取得終端使用者身分。須先定義可信 subject 來源；不得使用員工共用 token、runtime
+   service account、email 字串或未驗證 header 冒充獨立使用者。缺失時 `user_id=null`，
+   記錄 identity coverage，排除獨立使用者與留存計算，不可將所有未知者算成同一人。
+3. Foundation 1 的 email allowlist、全域 `ga4:read` scope 與 active tenant routing 並非
+   per-user tenant ACL。須先確認並實作使用者可存取 tenant 的權威政策與查核點；若部門
+   成員均可讀同一集合，也要有明確政策依據。Request context 至少能取得 user、host、
+   authorized tenant scope 與已解析 `tenant_id`，usage event 只保存必要的 scope reference／
+   version 與此次授權判定，不複製完整 tenant 名單。不能為補 telemetry 而額外查 registry，
+   或在 authentication／authorization denial 後繼續查資料。
+4. 以已驗證 subject 及 identity issuer namespace 推導穩定 pseudonymous `user_id`
+   （例如服務端 keyed hash），跨 host／token refresh 保持一致；金鑰與輪替策略需避免
+   無聲切斷 cohort。不保存原始 email／subject／token。`host` 優先由受管理 client mapping
+   取得；host 自述 metadata 僅作非可信產品屬性，無法辨識用 `other`，不能作授權依據。
+5. `eligible` 的員工名單、`authorized` 的 OAuth／connection lifecycle 是額外資料依賴。
+   目前 process-memory consent／refresh state 不是持久授權台帳，也不能由 initialize、
+   tools/list 或第一筆 query 倒推授權日期。正式 rollout 須驗證重啟、重新連線對統計的影響；
+   Foundation 1 的正式化限制維持揭露，不在本功能暗中擴充 authorization server。
+6. 現有部署腳本讀取 Cloud Logging ERROR logs，但 repository 未有 versioned usage logger
+   或其測試。現有 HTTP access logs、query provenance 與 MCP transport session ID 均不能
+   直接當成 usage contract 或完整 conversation ID。
+
+#### Scope and implementation sequence
+
+預設資料流：`ga4-analytics-service` → structured Cloud Logging → filtered Log Sink →
+BigQuery usage events → dashboard／weekly usage summary。不導入 Cloud SQL。
+
+| Item | Dependencies／順序 | 主要內容與預期重疊處 | Recommended branch |
+| --- | --- | --- | --- |
+| 11.1 Event contract 與 privacy policy | 先行；可與 identity 盤點並行 | 固定 schema、計數粒度、保留期限、allowlist 與告知方式；作為後續共同 contract | `feat/phase-11-usage-contract` |
+| 11.2 Per-user identity prerequisite | Foundation 1；11.1 context contract | subject、host、tenant access context；`oauth_auth.py`、`oauth_server.py`、`mcp_server.py`、`main.py`、`tenant_context.py` 及 auth tests | `feat/phase-11-usage-identity` |
+| 11.3 Request summary 與 intent classification | 11.1；既有 Phases 5、10 metadata | nullable summary、redaction、enum hints、規則與 fixtures；核心 sanitizer／classifier 可獨立開發，tool schema 接線需與 11.4 協調 | `feat/phase-11-usage-classification` |
+| 11.4 Usage logging middleware／request hooks | 11.1–11.3；與 11.2 順序整合 | MCP／REST／auth denial boundary、共用 orchestration outcome、failure isolation；和 11.2 高度重疊，不平行修改核心 handlers | `feat/phase-11-usage-logging` |
+| 11.5 Cloud Logging → BigQuery routing | 11.1、privacy policy；可與 11.3–11.4 分支開發，接真實資料前須驗證 serializer | 結構化事件／摘要附件分流、filtered sink、dataset／table IAM、partition、TTL、dedup 與成本控制 | `feat/phase-11-usage-routing` |
+| 11.6 Usage KPI views／dashboard | 11.2、11.4–11.5；funnel 另依賴員工／授權台帳 | 最小化 activation ledger、明確分母、cohort、品質指標、需求分布與 weekly summary；ledger 保存政策為發布前置，可先用合成 fixture 設計 | `feat/phase-11-usage-kpis` |
+| 11.7 Production validation | 11.1–11.6 | 小群組 pilot、雙 host／REST 驗收、權限與成本檢查、回復演練 | `chore/phase-11-usage-validation` |
+
+各可獨立工作使用專用 branch／PR；共同 `ROADMAP.md` 更新仍有文件衝突風險。未知 identity／
+tenant authorization 依賴應先回報，不能以放寬權限或共用 user ID 繞過。這裡僅規劃未來工作。
+
+#### Collection boundary and counting grain
+
+1. 只在服務收到 MCP／REST analytics 相關 request 時產生 usage event。可觀察 tool call、
+   經 allowlist 選取的 arguments、tenant／capability resolution、query execution、tool
+   outcome、error／denial／clarification；不以抓取 host 對話補齊資料。
+2. 每次服務接收的獨立呼叫由 server 建立唯一 UUID `interaction_id`；同次呼叫的 middleware、
+   handler、query hooks 沿用它。Client retry 是新呼叫、新 ID；同一事件的 log 重送保留原 ID。
+   不信任 client 提供的 ID 作為去重或授權依據。
+3. 第一版只發一筆 terminal canonical event：`analytics_request_completed`，無論 success、
+   failure、denied、unsupported 或 needs-clarification 都使用它；completed 表示本次處理終止，
+   不表示查詢成功。以 `(schema_version, interaction_id, event_name)` 去重，不逐 metric job 計數。
+   未來如增加 received／capability-resolved／query-completed 等 lifecycle events，必須共用
+   interaction ID、增加 event identity，且不得納入 canonical request count。
+4. 用 `request_kind` 區分 `analytics`、`capability_preflight`、`discovery`、`unclassified`。
+   `query_ga4`、MCP `traffic_summary` 與 REST `/traffic-summary` 是 analytics；
+   帶需求的 `get_ga4_capabilities` 是 capability_preflight，無需求的 inventory、metric search、
+   customer lookup／list 是 discovery。它們可使用同一 event envelope，但 analytics request
+   count **只計 `request_kind=analytics` 的 canonical events**，包含成功及未成功嘗試。
+   Preflight 的 unsupported／clarification 必須保留於獨立需求統計，不能因沒有 data query 消失。
+5. Tool-call count 計可辨識的 MCP `tools/call` canonical events，含 schema validation failure；
+   REST 另計。initialize、tools/list、health、OAuth callback 不算 analytics request 或 tool call。
+   Auth 在 MCP body dispatch 前拒絕時，不為 telemetry 讀完整 body；以 `unclassified`、nullable
+   tool／tenant／user 記錄拒絕的 transport request，排除 tool-call 與 analytics 分母、另報 denied。
+6. Preflight、search、data query 是不同呼叫，現有介面沒有可靠的跨 tool request correlation。
+   不把它們加總成「獨立使用者需求」或完整對話，也不以相近時間擅自合併；KPI 分別標示粒度。
+   若 host 沒有可靠 conversation ID，可將同一已識別 user 在跨 host／tenant 活動中，相鄰
+   間隔不超過 30 分鐘的呼叫分組為 `inferred session`，超過即新 session；這只是活動估計，
+   不是 host conversation，未知 user 不推估。MCP transport session 不自動具有此語意。
+
+#### Versioned usage event contract
+
+第一版 `schema_version=1.0`，以下示例為 `traffic_summary` 收到 `start_date=2026-09-07`、
+`end_date=2026-09-13` 且未提供 intent hint 的成功呼叫。不新增 `analyze_ga4` tool。
+所有 event 都有 schema version、server interaction ID、
+UTC ISO-8601 event time；`event_time` 是處理終止時間，latency 從接收時計算。
+
+```json
+{
+  "schema_version": "1.0",
+  "event_name": "analytics_request_completed",
+  "event_time": "2026-09-18T01:00:00Z",
+  "interaction_id": "8b812382-12f7-4cc6-b5fd-642e14764355",
+  "transport": "mcp",
+  "request_kind": "analytics",
+  "user_id": "pseudonymous-stable-id",
+  "identity_status": "verified",
+  "host": "claude",
+  "tenant_id": "5",
+  "authorization_scope_ref": "department-policy-v1",
+  "authorization_result": "allowed",
+  "tool_name": "traffic_summary",
+  "request_summary": null,
+  "request_summary_source": "unavailable",
+  "analysis_goal": "unknown",
+  "analysis_subject": "traffic",
+  "intent_source": "server_rule",
+  "intent_taxonomy_version": "v1",
+  "metrics": ["total_sessions", "total_users", "new_users", "returning_users"],
+  "dimensions": ["session_date"],
+  "period_type": "explicit_range",
+  "requested_days": 7,
+  "comparison_type": "previous_period",
+  "resolution": "supported",
+  "status": "success",
+  "latency_ms": 1350,
+  "result_row_count": 7,
+  "error_code": null,
+  "unsupported_reason": null
+}
+```
+
+Telemetry mapping 必須以各 tool 的既有 versioned contract 為單一來源，不另維護一份
+推測的 ID 清單。`query_ga4` 的 metrics 取已解析 catalog metric IDs；`traffic_summary`
+（含 REST）的 metrics 取 `traffic_summary_report.py` 的 `TRAFFIC_METRICS[*].metric_id`，
+不用顯示 label 或自行縮寫。維度依 catalog ID 與 report 的明確來源映射；本例 `session_date`
+對應 report date basis。未有映射的值保持空陣列／unknown，不用臆測值填滿 schema。
+
+本例的 `period_type=explicit_range` 只表示本次呼叫收到明確日期；即使恰好等於上週，
+也不能改寫成 relative window。`comparison_type=previous_period` 來自 report 固定的
+`immediately_preceding_equal_length` strategy，只代表實際報表比較方式，不證明使用者
+要求比較；因此沒有可靠 goal 證據時 `analysis_goal=unknown`。`analysis_subject=traffic`
+可由 tool contract 判定，故依既有混合 unknown 規則保留 `intent_source=server_rule`。
+文字摘要不充當 resolved period 或 intent hint 的替代證據。
+
+- `transport` 固定 `mcp | rest`；`host` 固定 `chatgpt | claude | web_app | other`；
+  `identity_status` 固定 `verified | unavailable`；authorization result 固定
+  `allowed | denied | unknown`。Scope reference 是受管理政策代碼，不是 token 或完整 ACL。
+- 字串識別欄位不得有時變成數字／物件；`tenant_id` 固定 string 或 null，BigQuery 對應
+  nullable STRING，沿用已解析 registry 的字串 ID；它是 opaque identifier，不做數值轉換、
+  trim 或大小寫正規化，`"5"`、`"005"`、`"tenant-a"` 均原樣保留且彼此不同。User、tool、scope
+  reference 無可信資訊時為 null。Preflight、未解析 tenant 或驗證前拒絕不得猜測 tenant ID。
+  若來源不是字串或缺失，telemetry 寫 null 並記錄不含原值的型別／缺失品質計數，不以
+  `str()` 或 `int()` 猜測轉型、不改變 analytics 結果；registry 清理／遷移另行規劃。
+- `metrics`／`dimensions` 固定為去重的 string arrays，僅記錄已驗證 ID，未知為空陣列；
+  preflight 的候選不能描述成實際查詢 metric。需要候選分析時另用明確命名的版本化欄位。
+  `period_type`／`comparison_type` 使用受管理 code mapping，無可靠證據用 `unknown`，
+  明確沒有比較才用 `none`；明確日期不能自行猜為「上週」。
+- `requested_days` 為正 integer 或 null（BigQuery nullable INT64），表示本次 request 中
+  可可靠解析的 explicit periods 聯集天數，包含起訖日；與 `period_type` 分開保存於
+  180 天 canonical event，不依賴短期 summary。Data tools／REST 的有效單一區間取
+  `(end_date - start_date).days + 1`；preflight 沿用 Phase 10 的 normalized explicit periods
+  與聯集計數，重疊／相鄰區段不重複計日。不包含固定 implicit previous comparison，
+  也不是 actual scan days；`all_available_data` metric 不改變本次需求天數。
+  只使用本次正常處理已取得的可靠期間資訊，不跨 tool call 回推、不為 telemetry 額外查詢
+  或另建 parser。未提供期間、解析不完整／無效、驗證前拒絕而尚未取得日期時為 null；
+  不把 `PeriodIntent.requested_days` 的預設 0 當成已解析需求。若已可靠算出天數後才因
+  policy 超限而 denied，仍保留該天數，不能截成上限；無可靠計數則保持 null。
+- `resolution` 固定 `supported | needs_clarification | unsupported | unknown`，與執行
+  `status=success | failure | denied | unsupported | needs_clarification` 分開。
+  支援需求仍可能執行失敗；preflight supported 的 success 不算 activation。Tenant 候選待確認
+  映射 needs_clarification；auth／權限／policy 拒絕映射 denied；backend exception 映射 failure。
+  既有 domain code 透過版本化 mapping 保留於 `error_code`，不是由 HTTP 200 或字串訊息猜成功。
+- `latency_ms` 為非負 integer；`result_row_count` 為非負 integer 或 null，semantic 為全部
+  metric 回傳列數總和，traffic summary 為 daily_series 列數，不把 headline 再算一次；
+  未完成查詢為 null，成功零列為 0 且可計為成功。`error_code`／`unsupported_reason` 為
+  allowlisted string 或 null，不存 exception 原文；unknown 錯誤映射固定 code。
+- 版本內固定欄位型別、nullable 與 enum 語意；新增欄位採向後相容策略，破壞性變更發布新
+  schema version／對應 BigQuery view，不能直接改舊表型別。離線修訂分類以 interaction ID
+  關聯衍生表，保留原始分類、分類版本與來源，不覆寫原事件或重複計 analytics request。
+
+#### Request summary and privacy policy
+
+`request_summary` 從 v1 納入，但 optional／nullable；舊 client 或不同 host 未提供仍正常
+執行。它只描述當前 GA4 分析需求，最長 500 Unicode 字元；寫入前遮罩 email、電話、token、
+credentials 與不必要個資，再限制長度。不可含完整 conversation history 或 GA4 無關內容；
+無法安全清理時捨棄為 null，不能改成記錄 raw input 作 fallback。
+
+`request_summary_source` 固定 enum：`host_model_generated`、`server_generated`、
+`client_generated`、`user_input`、`unavailable`。MCP 預期主要由 host model 提供；未提供時
+可由已驗證的結構化 arguments 產生 `server_generated` 摘要，不能稱為使用者原始問句。
+無可用摘要為 null／unavailable，來源由取得路徑決定並驗證，不是可信原話保證。
+
+採 allowlist-based event serialization，禁止序列化整個 request、AccessToken／claims、
+capability result 或 query result。尤其現有 capability result 含原始 `request`，period
+phrase match 含 `phrase`，provenance 含 SQL／parameters；均不得整包寫入 usage log。
+
+不得保存 OAuth access token、Authorization header、cookies、secrets／API keys、完整
+HTTP request body、完整 BigQuery query result、不必要的完整 SQL、host 完整 conversation
+history 或與 GA Analytics request 無關的文字。所有文字欄位與陣列均有大小上限；logger
+自己的錯誤診斷也必須遵守，避免 redaction 失敗反而洩漏 payload。
+
+保留期限初始規劃：結構化 usage events 180 天、summary 30 天，pilot 前由資料負責人確認。
+原始事件及其 Cloud Logging、BigQuery、衍生表與匯出副本均適用相同或更短期限；不能僅刪
+dashboard 欄位。下述最小化 activation ledger 是獨立核准的保存類別，不延長原始事件期限。
+
+第一版即採分流，不是可選的差異 TTL：canonical event 的 `request_summary` 固定寫 null、
+`request_summary_source` 固定寫 unavailable，表示「此紀錄未攜帶摘要」，不表示 host 未提供。
+只有摘要附件保存實際來源。完成 redaction／長度限制後，才可向獨立受限 log／table 寫入
+以下 `analytics_request_summary` 附件契約；不先將文字寫入 180 天 log 再期待 sink 移除。
+
+```json
+{
+  "schema_version": "1.0",
+  "event_name": "analytics_request_summary",
+  "event_time": "2026-09-18T01:00:00Z",
+  "interaction_id": "8b812382-12f7-4cc6-b5fd-642e14764355",
+  "request_summary": "查詢 2026-09-07 至 2026-09-13 的 GA4 流量摘要",
+  "request_summary_source": "server_generated"
+}
+```
+
+附件只允許上述欄位，沿用 canonical event 的 interaction ID 與處理終止時間；schema、
+時間、ID 型別同主契約，summary 為已清理的非空字串（最多 500 字），source 為前述四種
+實際來源之一。沒有安全可用摘要就不發附件，不發 null／unavailable 附件。每個 request
+至多一筆邏輯附件，以 `(schema_version, interaction_id, event_name)` 去重；重送不得
+刷新 event_time 或延長 30 天期限。附件不屬 canonical request，不增加任何 request count。
+
+Logging 與 BigQuery 分別設定專用短期儲存及 routing；確認預設 log bucket、額外 sink、
+匯出與備份不會留下長期摘要副本。期限以原事件時間為基準，已過期附件不得重新匯入。
+受限 view 可在期限內 left join 附件；不得把含摘要的 join 結果物化／匯出至 180 天儲存。
+附件缺失、亂序到達、logging failure 或到期均不影響主事件與 KPI，也不能重試主 analytics
+request 來補摘要。Sink 不具備任意欄位轉換的假設不可作為隱私保證，須驗證實際分流及清理。
+
+使用獨立 usage dataset，sink writer、pipeline、dashboard reader 與 summary reviewer
+採最小 IAM；一般部門使用者只能看經允許的彙總，不能因 GA4 tenant 權限而讀全員文字紀錄。
+定義小樣本呈現限制、刪除及到期驗證，並在內部使用說明／consent 告知收集欄位、目的、
+保存期限與可存取角色；不為此更改 GA4 OAuth scopes。
+
+#### Activation ledger and history coverage
+
+為避免原始 events 在 180 天到期後把舊使用者重新算成首次 activated，11.6 規劃獨立的
+BigQuery activation ledger：每個 pseudonymous `user_id` 僅保存 `first_success_at`
+（UTC timestamp）與 `measurement_version`；不保存 summary、tenant、metric、SQL 或完整
+使用歷程。從去重且 identity verified 的成功 analytics canonical events 非同步、冪等更新，
+首次時間取最早已觀測成功時間；較晚到達的早期事件可往前修正，並重算受影響 cohort。
+附件或 preflight 不得建立 activation，ledger 更新失敗不得影響 analytics response。
+
+Ledger 採獨立且可超過 180 天的保存政策：僅在核准的內部產品量測期間保留，期間結束後
+依核准期限清理，不隨每次回訪自動展延。資料負責人須在發布前明定具體保存期間、用途、
+最小 IAM、刪除期限、使用者刪除要求及 identity key 輪替／映射處理；未核准不得預設永久
+保存，也不得發布依賴長期歷史的累積 activation 指標。內部告知須明列此保存類別及期限。
+
+另以 measurement version 管理不含個人資料的觀測起點、已知缺漏及 pipeline watermark。
+Ledger 必須持續維護，不能等事件過期後才由剩餘 180 天資料重建。首次成功指「指定量測
+起點以來最早已觀測成功」，不宣稱捕捉遺失的 events。只有 ledger／identity 連續性與歷史
+覆蓋足夠時，才提供該量測起點以來的新 activation 及累積值。
+
+Ledger 不可用、歷史不足、已到期／刪除或 key rotation 無法保持連續性時，受影響報表必須
+降級為「可觀測期間內首次成功」，標示起點與缺口，停止提供無法支持的全歷史首次／累積
+activation 及首次 activation cohort；不能把重新出現的 user 默認為新人。刪除後若無法
+可靠識別受影響 user，須對整個受影響 measurement version 降級，不能另留未核准的
+user tombstone 繞過刪除。合規刪除造成統計修訂需揭露，不承諾累積值永不下降。
+
+Ledger 只保存首次時間，不保留後續活動：W1–W4 留存仍需完整且未到期的 follow-up events。
+超出可用事件窗口的歷史 cohort 標為不可重算，不將缺失值當作零；本階段不藉 ledger
+無限期保留個別使用者的活動或留存明細。
+
+#### Intent taxonomy and deterministic classification
+
+需求類型與產品支援狀態分離，固定 `intent_taxonomy_version=v1`：
+
+| Dimension | Allowed values |
+| --- | --- |
+| `analysis_goal` | `overview`、`comparison`、`trend`、`breakdown`、`ranking`、`diagnosis`、`recommendation`、`data_lookup`、`unknown` |
+| `analysis_subject` | `traffic`、`acquisition`、`campaign`、`content`、`landing_page`、`audience`、`conversion`、`engagement`、`cross_source`、`unknown` |
+| `intent_source` | `server_rule`、`host_model_hint`、`offline_classifier`、`manual_review`、`unknown` |
+
+1. 優先由 server deterministic rules 判斷，並版本化 mapping、precedence 與 conflict cases。
+   `period_contract.py` 的 outcome、`window_kind`、explicit／implicit periods、requested_days
+   與 comparison_modifier 可提供期間／比較線索；只抽取 code／日期等安全 metadata。
+   Data tool 目前只有 start／end，不能假裝保留了 preflight 自然語言或 relative window kind。
+2. `capability_registry.py` 的 resolution、reason_code、next_action、registry version 與
+   metric candidates 可提供支援邊界及主題候選；capability resolution 不直接等於 goal。
+   `semantic_catalog.py` 的 metric ID、category、main_metric、dimensions、model、profile
+   與 catalog version 可映射 subject；固定 report 使用前述 tool contract mapping，不能任意創造 ID。
+3. `main.py` 的 `prepared_metrics`／`PreparedQuery` 是既有 resolved query plan 的可用部分，
+   可取實際 metric、date_scope、日期與結果狀態；目前沒有通用的 goal、comparison 或任意
+   group-by intent 欄位。固定 report comparison、daily series 是結果形狀，不足以斷言使用者
+   想 diagnosis／trend。`all_available_data` 也不能說成實際只讀 requested period。
+   缺少線索回 unknown，不新增 SQL parser 或大幅重構 query plan。
+4. 無法由結構化參數可靠推導的 diagnosis／recommendation 等語意，可接受 host model 的
+   固定 enum hint。Server 驗證型別、enum、長度及與已知事實的一致性，deterministic 證據
+   優先；無效或衝突 hint 忽略並安全 fallback，不改變 analytics 結果。
+   兩個維度分別判定；若其中採用 hint，整體 `intent_source=host_model_hint`，只有全部
+   非 unknown 分類都由規則取得才為 server_rule；全 unknown 為 unknown。
+5. 不允許 AI 自由輸出任意 intent 字串。離線 classifier／manual review 僅在受控衍生資料補
+   分類，記錄 `intent_source`／taxonomy version，不能阻塞或改變當下查詢結果及權限。
+   例如 GA4 與 Meta 廣告比較應保留 goal=comparison、subject=cross_source、
+   resolution=unsupported、unsupported_reason=external_source_not_available；不因不支援
+   就抹除需求，也不因分類就增加外部資料查詢能力。
+
+#### Adoption funnel and usage metrics
+
+Funnel 以去重的穩定 user ID 連接不同來源；不是每個階段都能由 analytics handler 觀察。
+
+| Stage | 可觀測條件與資料依賴 |
+| --- | --- |
+| `eligible` | 在觀察期間具使用資格的部門成員；需外部員工／資格名單及生效時間，allowlist 不自動等於完整 denominator。 |
+| `authorized` | 已完成服務授權／connection 的獨立 user；需可持久查核的 OAuth／connection lifecycle 台帳，不把 consent page view、refresh 或重連重算新人。未提供時標示不可量測。 |
+| `tried` | 已驗證使用者至少一次已知 MCP tool 的有效 schema call；即使 outcome 是 unsupported／clarification 也算嘗試，auth denial／invalid schema 不算。REST 初次使用另報，不冒稱 tool call。 |
+| `activated` | 至少一次 `request_kind=analytics` 且 status=success 的獨立 user（MCP 或 REST）；search、preflight success 及僅列出客戶不算。 |
+| `retained` | 首次 activation 後的指定觀察期再次成功完成 analytics request；須完整的 cohort follow-up window。 |
+
+REST user 可 activated 而沒有 MCP tried，funnel 應按 transport 揭露非嚴格階梯，不能強制補造
+中間事件。沒有 eligible／authorized 台帳時，只報可觀測絕對數及資料缺口，不報虛構轉換率。
+
+統計日界／週界預設 `Asia/Taipei`、週一開週，UTC event_time 轉換後計算；報表標示期間、
+資料延遲、identity coverage 與缺漏，未成熟 cohort 不當作零留存。
+
+| Metric | 第一版定義／分母 |
+| --- | --- |
+| Activated users | Ledger 的 first_success_at 落在報告期間的獨立 user；累積值為指定量測起點至報告期末的 ledger 去重 users。須符合 history coverage 條件，資料不足時降級標示，不從剩餘 180 天 events 推定全歷史首次。 |
+| DAU／WAU／MAU | calendar 日／週／月內有成功 analytics 的獨立 user；小樣本優先 WAU 與絕對數，不製造無意義精度。 |
+| Active days per user | 期間內各 user 至少一次成功 analytics 的不同日期數。 |
+| Analytics requests per user | 各已識別 user 的去重 analytics 呼叫數，含各種 status；平均分母為期間內有 analytics 嘗試的已識別 users。 |
+| Successful requests | canonical analytics events 中 status=success 的數量，與多 metric job 數、tool-call count 分開。 |
+| Repeat usage rate | 期間內至少兩個不同日期成功 analytics 的 users／同期間至少一次成功的 users；同日重試不算回訪。 |
+| 4-week retention | 以具足夠歷史覆蓋的 ledger first_success_at 所在 calendar week 為 W0；W4 再成功使用人數／已完整觀察至 W4 結束的該 cohort 人數。W1–W4 表須有完整且未到期的 follow-up events，窗口到期或 history coverage 不足則標示不可量測。 |
+| Supported／needs-clarification／unsupported rate | 在 capability_preflight canonical events 中各 resolution 數／三種已知 resolution 總數；另列 unknown coverage。Data analytics 的 resolution 另表同法計算，禁止混合兩種分母；tenant clarification 另依 status 報告。 |
+| Failure rate | analytics status=failure／全部 canonical analytics attempts；另報 denied、unsupported、needs-clarification 占比，不能將它們當 backend failure。 |
+| Top analysis goals／subjects | 按 request_kind 分開，以去重 interaction 統計 taxonomy 分布，保留 unsupported、unknown 及 intent_source。 |
+| Top metrics／dimensions | 以每個 canonical analytics request 中每個已驗證 ID 至多一次計數；不依結果列數加權，preflight 候選另報。 |
+| Top period／comparison patterns | 依 period_type、requested_days 與 comparison_type 分布，分開 preflight／analytics；保留 null／unknown coverage。以 requested_days 區分 7／90 天等需求長度，固定 implicit comparison 另計模式，不猜原始相對措辭或以實際掃描範圍替代需求期間。 |
+| Top unsupported reasons | unsupported events 的受管理 reason code 分布，分開 preflight 與 data analytics。 |
+| Latency／error categories | 依 tool、transport、status 的 p50／p95 latency 及 auth、tenant、validation、policy、timeout、backend／unknown error code 分布；不保存 exception 原文。 |
+
+Tool-call、analytics request、inferred session 為三種獨立單位，dashboard／weekly summary
+需明列。來源覆蓋只限實際送達服務的需求；不能用這些排名推論所有 host 對話或全體未使用者。
+
+#### KPI data sufficiency check
+
+11.1 contract 與 11.6 KPI views 共同維護下表；新增或修改任何指標／欄位時，必須先確認
+「資料從哪來、保存多久、缺失時怎麼辦」。沿用上方 KPI 分母，不另定義一套計數；
+所需歷史超出保存窗口時縮短報告範圍或標示不可量測，不將缺失當作 0，也不從摘要補造。
+
+| 指標／用途 | 必要資料與來源 | 保存／缺失處理 |
+| --- | --- | --- |
+| Eligible／authorized funnel | 外部資格名單、生效時間、持久 connection lifecycle 與穩定 user mapping | 發布前確認來源保存政策及覆蓋的報告期間；缺任一分母就不報該轉換率。 |
+| Tried／tool-call／analytics request counts | MCP dispatch／validation outcome → transport、tool_name、request_kind、status、error_code、interaction_id；tried 另需 verified user，排除 invalid schema／auth denial | Canonical 180 天；無法辨識的呼叫另列 unclassified，不推測 tool 或有效呼叫。 |
+| Activated users／累積 activation | Verified user 的成功 analytics event → ledger first_success_at、measurement_version | Ledger 獨立核准政策；歷史不連續時依 history coverage 降級。 |
+| DAU／WAU／MAU、active days、requests per user、repeat usage、inferred session | Request context／canonical event 的 user_id、identity_status、event_time、request_kind、status、interaction_id | Canonical 180 天；未知 user 不算獨立人數或 session。日／週／月及 session 邊界需完整資料，窗口截斷需揭露。 |
+| W1–W4 retention | Ledger cohort + follow-up 成功 analytics events | 同時滿足 ledger policy 與 180 天事件窗口；未成熟、缺漏或已到期 cohort 不計為零。 |
+| Successful requests、resolution／failure rates、unsupported reasons、latency／errors | Capability／query outcome → resolution、status、unsupported_reason、error_code、latency_ms，依 request_kind 去重計算 | Canonical 180 天；未知 resolution／error 另列 coverage，不混淆拒絕與 backend failure。 |
+| Top goals／subjects／metrics／dimensions | 已驗證 taxonomy／hint、catalog／report contract → analysis_goal、analysis_subject、intent_source、metrics、dimensions | Canonical 180 天；未知分類保留 unknown，缺 ID 為空陣列，不拿 candidates 或 labels 當實際查詢 ID。 |
+| Top period／comparison patterns | 本次 normalized explicit periods／日期參數與 report strategy → period_type、requested_days、comparison_type | Canonical 180 天；summary 到期後仍可分辨期間長度；不能還原原始措辭則保持 explicit_range／unknown。 |
+| 摘要檢閱（非 KPI 分母） | Redacted summary attachment，以 interaction_id 關聯 | 30 天；到期或缺失不影響上列結構化 KPI，不保留長期文字副本。 |
+
+#### Reliability, rollout and validation
+
+1. Emission 必須非阻塞或 failure-isolated：bounded queue／短 timeout、有限重試、queue full
+   時可丟棄並以不含 payload 的計數告警。禁止同步向 BigQuery 寫入或在 request 中等待
+   sink。Serializer、redaction、logger、網路故障均不能讓 GA4 request 失敗或改變 tool result。
+   Cloud Run 終止前的 buffer loss、process crash 無 terminal event 與 sink delivery delay
+   必須量測及揭露，不承諾 exactly-once／零遺失，也不能拿 usage log 取代完整 security audit。
+2. 先以合成事件驗證型別、去重、partition、TTL、IAM 與所有分母，再於小群組開啟結構化
+   logging，summary 分開開關。Filtered sink 僅允許專用 usage log、環境與已知 schema；
+   摘要附件使用獨立短期 log／sink／table，排除所有長期 log bucket 與 sink；ledger 採獨立
+   核准保存政策並驗證更新 freshness。不匯出一般 access／error log。BigQuery partition 依 event date、要求時間 filter，設定
+   dashboard query bytes 限制與預算；usage 查詢成本另盤點，避免耗盡 GA4 billing quota。
+3. Pilot 覆蓋 Claude、ChatGPT（可用時）與 REST；驗證 stable subject、host mapping、
+   tenant 權限、舊 client 不帶 summary／hint、拒絕與澄清、重試與多 metrics 的計數。
+   未實測 host 列為未驗證；不能把 server fixtures 當作 host tool-choice 驗收。
+4. 對照服務端合成／pilot request 計數與 BigQuery dedup views，量測遺失、延遲、重送、
+   unknown identity／intent／host 及 failure isolation 的 latency overhead。Rollout 前訂定
+   可接受門檻、資料負責人及 freshness 告警，並查核 Logging／BigQuery 副本均無敏感資訊。
+5. Rollback 可停用 usage emission／summary、停用 sink 及暫停 dashboard refresh；保留
+   analytics 行為與必要 auth boundary，不能為關閉 telemetry 撤銷 tenant 授權檢查。
+   停止收集不等於刪除既有資料，依 retention／清理流程驗證。
+
+#### Acceptance criteria
+
+- Logging 成功時產生符合 versioned schema 的 canonical event；MCP／REST 的 success、
+  failure、denied、unsupported、needs-clarification 均有一致 mapping，含 middleware
+  早期拒絕、schema validation failure 與 handler exceptions，不只測 happy path。
+- 每個獨立 request 有唯一 interaction ID，同 request 各層共用；多 metrics、nested hooks、
+  retry 與 log duplicate fixtures 證明 request count 不重複，preflight 不誤算 activation。
+- Logger exception、serialization／redaction failure、timeout、queue full 及 sink outage
+  的 fault-injection 測試證明正常 analytics 回應與原有錯誤行為不變；無敏感 fallback log。
+- 測試含 access token、Authorization header、cookie、secret、完整 raw request、query
+  result／SQL、email／電話及過長摘要；驗證 allowlist、redaction、500 字上限、nullable
+  summary 與 enum source，不把完整 request／result／provenance 寫入 log。
+- Taxonomy 與 host hint 只接受固定 enum，deterministic classifier 有 unit fixtures 覆蓋
+  period／metric／dimension／comparison／capability、cross-source unsupported、衝突
+  hint 與缺少證據；無法分類安全回 unknown，分類與 offline job 不影響查詢或授權。
+- Subject 在 MCP／REST、refresh、並行 user、不同 host 間正確傳遞且不互相污染；tenant
+  scope 與 tenant ID 來自可信 context。缺失 identity 時人數／留存明確排除並顯示 coverage。
+- 同版本欄位型別、nullability、enum、schema migration 與 BigQuery ingestion 相容性有
+  contract tests；匿名拒絕、零列成功、多 metric 結果及尚未解析 tenant 都有 fixture。
+  Tenant ID 須從 resolver／report 到 event／BigQuery nullable STRING 保持字串契約，覆蓋
+  `"5"`、`"005"`、`"tenant-a"`、null 及非字串來源；不得合併不同 ID、將 null 寫成 `"None"`，
+  或讓 telemetry 型別問題改變主查詢結果；文件範例亦須與既有 tenant contract fixtures 一致。
+- Funnel／KPI fixtures 驗證 external denominator 缺失、跨日／週界、W4 未成熟 cohort、
+  REST 非階梯 funnel、30 分鐘 inferred session，以及 tool-call／analytics／session
+  三種計數；沒有完整對話資料時不能宣稱量測了完整對話數。
+- Telemetry mapping／文件範例與既有 tool contract 有一致性驗收：traffic summary metrics
+  必須等於 `TRAFFIC_METRICS` IDs，semantic metrics／dimensions 由 catalog 驗證；不得以
+  label、SQL alias 或摘要文字替代。明確日期恰好落於上週及一般任意區間，都保持
+  explicit_range；沒有本次呼叫的可靠 relative-period／goal 證據時，不從日期、固定比較
+  或其他 tool call 倒推原始意圖。Report comparison 可記錄，但不能把它當成使用者 goal。
+- KPI data sufficiency check 與文件範例須作為固定驗收：逐項比對來源契約、型別及
+  所需歷史；移除 summary 後，兩筆 period_type 同為 explicit_range、requested_days
+  分別為 7／90 的事件仍可正確分組，不能以 result_row_count 代替需求天數。
+  覆蓋單日=1、重疊 explicit periods 聯集、implicit previous 不加倍、all_available_data
+  不改需求天數、可靠超限天數不截斷，以及未知／無效期間為 null（非預設 0）；文件
+  example、classifier／serializer 與 KPI views 使用同一語意，保存到期時依上表降級。
+- 保存期限 fixtures 覆蓋同一 user 第 1 天成功、第 181 天回訪：第 1 天原始 event 到期後，
+  ledger 仍保留首次時間，不重算新 activation；重送不加人數、late event 修正首次時間與
+  cohort。Ledger 缺失／刪除／到期、identity 斷裂及 pipeline gap 必須觸發 history coverage
+  降級；follow-up events 到期的 W4 不得顯示零留存或從 ledger 猜測。
+- Canonical 範例及 serializer 均驗證 summary=null、source=unavailable；摘要只存在於
+  專用 30 天附件。第 31 天附件與所有文字副本已到期不可讀，但 canonical event 與 request
+  count 仍保留；涵蓋附件重送、亂序、缺失、故障、過期重匯入及 join／export 無長期文字副本。
+- 發布前核准 ledger 的具體保存及刪除政策，驗證 IAM、清理、identity 輪替與歷史覆蓋告知；
+  未核准時長期累積 activation／首次 cohort 不可發布，不得以擴大原始 event TTL 替代。
+- Local regression 沿用 OAuth、tenant context、capability、period、query policy 與 report
+  suites，未來實作執行 `.venv/bin/python -m unittest discover -s tests -v`，另執行當時
+  repository 可用的相關 lint／type check／build；本規劃不代表已新增或跑過 telemetry 測試。
+- Production validation 留有 sink 到達／dedup、IAM 正反例、資料隔離、TTL 到期、成本與
+  rollback 紀錄；內部告知完成。外部員工／授權資料、Cloud Run buffer 行為、host metadata
+  可信度及實際 connector 行為仍需驗證，未完成前不得宣稱完整 adoption／retention 可用。
+
+#### Non-goals
+
+不收集 ChatGPT／Claude 的其他對話、未觸發服務的訊息、host 最終完整回答或完整可靠的
+conversation history；不做完整對話錄影、個別員工績效評估、GA4 終端訪客追蹤、任意 SQL
+記錄或新的資料來源查詢。不新增 Cloud SQL、OAuth scopes、個人 query quota 或 Phase 10
+跨 tool 安全狀態。Summary／hint 的未來 optional tool schema 擴充需獨立實作與相容性驗收；
+本次僅更新規劃，不修改程式／測試、不建立 dataset／table／sink，也不部署。
+
 ## Ongoing operational work
 
 以下項目是與功能 roadmap 並行的持續性營運工作，每次正式發布前都應持續執行：
