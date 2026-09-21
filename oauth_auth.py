@@ -47,6 +47,20 @@ async def require_rest_oauth(request: Request):
         access, mode=runtime.mode, transport="rest",
         required_scope=runtime.config.required_scope if runtime.config else "ga4:read",
     )
+    transport = request.scope.get('usage_transport')
+    if transport is not None:
+        context.started_at = transport['started_at']
+        transport['context'] = context
+    from usage_logging import begin, emitter
+    if emitter.enabled:
+        try:
+            # REST carries only enum hints; no free-text summary in GET URL/access logs.
+            begin(context, 'traffic_summary', {
+                'analysis_goal_hint': request.query_params.get('analysis_goal_hint'),
+                'analysis_subject_hint': request.query_params.get('analysis_subject_hint'),
+            })
+        except Exception:
+            pass
     with bind_context(context):
         yield access
 

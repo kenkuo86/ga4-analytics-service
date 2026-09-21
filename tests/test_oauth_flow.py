@@ -68,6 +68,83 @@ class FakeGoogleIdentity:
 
 
 class OAuthFlowTests(unittest.TestCase):
+    def test_consent_discloses_enabled_collection_and_summary_switch(self):
+        import usage_logging as usage
+        for summaries in (False, True):
+            writer=usage.BoundedEmitter(lambda row: None,enabled=True,summaries=summaries,start_worker=False)
+            with patch.object(usage,'emitter',writer):
+                response,_=self._get_consent_page()
+            self.assertIn('結構化事件保存180天',response.text)
+            self.assertIn('量測開始起一年',response.text)
+            self.assertIn('另存30天' if summaries else '目前不保存文字摘要',response.text)
+            self.assertNotIn('USAGE_IDENTITY_KEY',response.text)
+
+    def test_usage_events_cover_http_mcp_rest_errors_and_old_clients(self):
+        from datetime import date
+        import usage_logging as usage
+        from usage_identity import IdentitySettings, record_resolved_tenant
+        from queue import Empty
+        writer = usage.BoundedEmitter(lambda row: None, enabled=True, summaries=True, start_worker=False)
+        def take():
+            rows=[]
+            while True:
+                try: rows.append(writer.queue.get_nowait())
+                except Empty: return rows
+        tokens = self._exchange_code(self._authorize_and_consent()).json()
+        headers = {**self.headers, "authorization": f"Bearer {tokens['access_token']}",
+                   "accept": "application/json, text/event-stream"}
+        def rpc(name, arguments, request_id=2):
+            return self.client.post('/mcp/',headers=headers,json={'jsonrpc':'2.0','id':request_id,
+                'method':'tools/call','params':{'name':name,'arguments':arguments}})
+        with patch.object(usage,'emitter',writer), patch('usage_identity.settings',IdentitySettings(b'a'*32)):
+            denied=self.client.post('/mcp',headers={**self.headers,'accept':'application/json, text/event-stream'},json={'private':'raw body'})
+            self.assertEqual(denied.status_code,401)
+            rows=take(); self.assertEqual(len(rows),1)
+            self.assertEqual(rows[0]['request_kind'],'unclassified');self.assertEqual(rows[0]['status'],'denied')
+            self.assertIsNone(rows[0]['tool_name']);self.assertIsNone(rows[0]['user_id'])
+            initialized=self.client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':1,'method':'initialize',
+                'params':{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'test','version':'1'}}})
+            headers['mcp-session-id']=initialized.headers['mcp-session-id']
+            self.client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','method':'notifications/initialized'})
+            self.client.post('/mcp',headers=headers,json={'jsonrpc':'2.0','id':10,'method':'tools/list','params':{}})
+            self.assertEqual(take(),[])
+            def traffic(**kwargs):
+                usage.observe_period(date(2026,9,1),date(2026,9,7))
+                record_resolved_tenant('005')
+                return {'status':'ok','daily_series':[],'query_provenance':{'sql':'SECRET SQL'}}
+            args={'customer_name':'private name','start_date':'2026-09-01','end_date':'2026-09-07'}
+            with patch('mcp_server.get_traffic_summary',traffic):
+                response=rpc('traffic_summary',args)
+                self.assertEqual(response.status_code,200,response.text)
+                rows=take();self.assertEqual(len(rows),2)
+                self.assertEqual(rows[0]['status'],'success');self.assertEqual(rows[0]['tenant_id'],'005')
+                self.assertEqual(rows[0]['requested_days'],7);self.assertEqual(rows[0]['result_row_count'],0)
+                self.assertIsNone(rows[0]['request_summary']);self.assertEqual(rows[1]['request_summary_source'],'server_generated')
+                self.assertNotIn('SECRET',str(rows));self.assertNotIn('private name',str(rows))
+                # Wrong hint types are ignored, not analytics schema errors.
+                response=rpc('traffic_summary',args|{'analysis_goal_hint':{'secret':'bad'},'request_summary':'Authorization: Bearer SECRET'})
+                self.assertEqual(response.status_code,200)
+                rows=take();self.assertEqual(len(rows),1);self.assertEqual(rows[0]['status'],'success')
+            response=rpc('traffic_summary',{'customer_name':'missing dates'})
+            self.assertEqual(response.status_code,200)
+            rows=take();self.assertEqual(len(rows),1);self.assertEqual(rows[0]['error_code'],'invalid_schema')
+            self.assertEqual(rows[0]['metrics'],[])
+            response=rpc('get_ga4_capabilities',{'request':'比較 GA4 與 Meta 廣告花費','analysis_goal_hint':'comparison'})
+            rows=take();self.assertEqual(len(rows),1);self.assertEqual(rows[0]['status'],'unsupported')
+            self.assertEqual(rows[0]['request_kind'],'capability_preflight');self.assertEqual(rows[0]['analysis_subject'],'cross_source')
+            response=rpc('unknown_tool',{})
+            rows=take();self.assertEqual(len(rows),1);self.assertEqual(rows[0]['error_code'],'unknown_tool')
+            with patch('mcp_server.get_traffic_summary',side_effect=RuntimeError('backend failed')):
+                response=rpc('traffic_summary',args)
+            rows=take();self.assertEqual(rows[0]['status'],'failure');self.assertEqual(rows[0]['error_code'],'backend_error')
+            with patch('main.get_traffic_summary',traffic):
+                response=self.client.get('/traffic-summary',headers=headers,params=args)
+                self.assertEqual(response.status_code,200)
+            rows=take();self.assertEqual(len(rows),2);self.assertEqual(rows[0]['transport'],'rest')
+            response=self.client.get('/traffic-summary',headers=headers)
+            self.assertEqual(response.status_code,422)
+            rows=take();self.assertEqual(len(rows),1);self.assertEqual(rows[0]['error_code'],'invalid_schema')
+
     def test_usage_identity_reaches_real_mcp_rest_and_refreshed_token(self):
         from usage_identity import IdentitySettings, current_context
         config = IdentitySettings(b"a" * 32, {"claude-web-test": "claude"})

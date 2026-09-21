@@ -151,6 +151,18 @@ default false keeps SQL and provenance out of the normal result.
 }
 
 
+_USAGE_DESCRIPTION = """
+Optional usage metadata: request_summary describes only this GA4 analysis intent,
+never customer/person names, credentials, SQL, results or conversation history.
+It may be omitted; the server can generate a minimal structured summary.
+analysis_goal_hint and analysis_subject_hint accept only their listed enum values.
+Hints are product metadata, never authorization or capability evidence; server facts
+win and invalid/conflicting hints are ignored without changing the query.
+""".strip()
+for _usage_tool in ("query_ga4", "traffic_summary", "get_ga4_capabilities"):
+    PUBLIC_TOOL_DESCRIPTIONS[_usage_tool] += "\n\n" + _USAGE_DESCRIPTION
+
+
 _SERVER_INSTRUCTIONS_BASE = """
 This server resolves every customer name through the tenant registry. Users
 never need to know or provide tenant_id, project_id, or dataset_id. Use the

@@ -145,5 +145,10 @@ class MCPIdentityMiddleware:
         access = user.access_token if isinstance(user, AuthenticatedUser) else None
         required = self.runtime.config.required_scope if self.runtime.config else "ga4:read"
         context = trusted_context(access, mode=self.runtime.mode, transport="mcp", required_scope=required)
+        if ctx.request is not None:
+            transport = ctx.request.scope.get('usage_transport')
+            if transport is not None:
+                context.started_at = transport['started_at']
+                transport['context'] = context
         with bind_context(context):
             return await call_next(ctx)
