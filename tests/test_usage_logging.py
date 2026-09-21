@@ -78,6 +78,20 @@ class LoggingTests(unittest.TestCase):
         self.assertEqual(record['metrics'],[])
         self.assertNotIn('raw secret',json.dumps(record))
 
+    def test_invalid_preflight_date_stays_clarification(self):
+        from capability_registry import capability_registry
+        ctx=context()
+        request='查詢 GA4 2026-02-30 到 2026-03-05 流量摘要'
+        with bind_context(ctx):
+            usage.begin(ctx,'get_ga4_capabilities',{'request':request});ctx.usage['entered']=True
+            usage.observe_result(capability_registry.resolve(request))
+            usage.finish(ctx)
+        record=drain(self.emitter)[0]
+        self.assertEqual(record['status'],'needs_clarification')
+        self.assertEqual(record['resolution'],'needs_clarification')
+        self.assertEqual(record['error_code'],'invalid_period')
+        self.assertIsNone(record['requested_days'])
+
     def test_policy_denial_retains_reliable_days_not_zero_or_scan_days(self):
         from query_policy import query_policy
         ctx=context()

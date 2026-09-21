@@ -113,8 +113,9 @@ def observe_result(result):
             state['status'] = 'success' if resolution == 'supported' else resolution
         reason = result.get('reason_code')
         if reason in _DENIED:
-            state['status'] = 'denied'
             state['error_code'] = reason
+            if reason != 'invalid_period':
+                state['status'] = 'denied'
         if resolution == 'unsupported':
             state['unsupported_reason'] = 'external_source_not_available' if reason in _EXTERNAL else 'unknown'
         # Classifier selects codes/counts. Never retain the capability result (raw request/phrases).
