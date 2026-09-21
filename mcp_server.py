@@ -24,6 +24,8 @@ from query_policy import QueryPolicyError
 from semantic_catalog import SemanticCatalogError
 from traffic_summary_report import TrafficSummaryReportError
 from usage_identity import MCPIdentityMiddleware
+from usage_logging import (MCPUsageMiddleware, UsageTransportMiddleware, observed_handler,
+                           SummaryInput, GoalInput, SubjectInput)
 
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -48,7 +50,7 @@ if oauth_runtime.config is not None and oauth_runtime.provider is not None:
 mcp = MCPServer(
     "GA4 Analytics Service",
     instructions=SERVER_INSTRUCTIONS,
-    middleware=[MCPIdentityMiddleware(oauth_runtime)],
+    middleware=[MCPIdentityMiddleware(oauth_runtime), MCPUsageMiddleware()],
     **mcp_auth_kwargs,
 )
 
@@ -75,6 +77,7 @@ async def health(request: Request):
 
 
 @mcp.tool(description=capability_registry.tool_description("customer_lookup"))
+@observed_handler
 def customer_lookup(customer_name: str) -> dict:
     """Run the customer lookup described by the capability registry."""
     try:
@@ -84,6 +87,7 @@ def customer_lookup(customer_name: str) -> dict:
 
 
 @mcp.tool(description=capability_registry.tool_description("list_available_customers"))
+@observed_handler
 def list_available_customers() -> dict:
     """List customers using the capability registry's public contract."""
     try:
@@ -98,13 +102,16 @@ def list_available_customers() -> dict:
 
 
 @mcp.tool(description=capability_registry.tool_description("get_ga4_capabilities"))
-def get_ga4_capabilities(request: str | None = None) -> dict:
+@observed_handler
+def get_ga4_capabilities(request: str | None = None, request_summary: SummaryInput = None,
+                         analysis_goal_hint: GoalInput = None, analysis_subject_hint: SubjectInput = None) -> dict:
     """Resolve a request against local connector capability metadata."""
 
     return get_ga4_capability_resolution(request)
 
 
 @mcp.tool(description=capability_registry.tool_description("search_ga4_metrics"))
+@observed_handler
 def search_ga4_metrics(
     query: str,
     profile: str | None = None,
@@ -122,6 +129,7 @@ def search_ga4_metrics(
 
 
 @mcp.tool(description=capability_registry.tool_description("query_ga4"))
+@observed_handler
 def query_ga4(
     customer_name: str,
     metric_ids: list[str],
@@ -129,6 +137,9 @@ def query_ga4(
     end_date: str,
     limit: int = 50,
     include_query: bool = False,
+    request_summary: SummaryInput = None,
+    analysis_goal_hint: GoalInput = None,
+    analysis_subject_hint: SubjectInput = None,
 ) -> dict:
     """Query metrics using the capability registry's public contract."""
     try:
@@ -145,11 +156,15 @@ def query_ga4(
 
 
 @mcp.tool(description=capability_registry.tool_description("traffic_summary"))
+@observed_handler
 def traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
     include_query: bool = False,
+    request_summary: SummaryInput = None,
+    analysis_goal_hint: GoalInput = None,
+    analysis_subject_hint: SubjectInput = None,
 ) -> dict:
     """Run the traffic report described by the capability registry."""
     try:
@@ -245,7 +260,7 @@ class MCPPathCompatibilityMiddleware:
         await self.wrapped_app(scope, receive, send)
 
 
-app = MCPPathCompatibilityMiddleware(OAuthPublicClientMetadataMiddleware(mcp_app))
+app = UsageTransportMiddleware(MCPPathCompatibilityMiddleware(OAuthPublicClientMetadataMiddleware(mcp_app)))
 
 
 if __name__ == "__main__":

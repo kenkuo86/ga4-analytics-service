@@ -285,6 +285,13 @@ class QueryPolicy:
                 "invalid_date_range",
                 "start_date 不得晚於 end_date。",
             )
+        # Reuse normally parsed dates, including reliable policy-denied lengths.
+        # Telemetry import/observation failure must never alter query validation.
+        try:
+            from usage_logging import observe_period
+            observe_period(parsed_start, parsed_end)
+        except Exception:
+            pass
         if parsed_start < self.earliest_date:
             raise QueryPolicyError(
                 "date_before_available_range",

@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from capability_registry import capability_registry
 from oauth_auth import require_rest_oauth
 from usage_identity import record_resolved_tenant, require_tenant_access
+from usage_logging import observed_handler, observe_metrics, GoalInput, SubjectInput, UsageTransportMiddleware
 from query_policy import (
     QUERY_PROVENANCE_SCHEMA_VERSION,
     PreparedQuery,
@@ -34,6 +35,7 @@ from traffic_summary_report import (
 )
 
 app = FastAPI()
+app.add_middleware(UsageTransportMiddleware)
 
 # 改成你實際存放 tenant_registry 的完整 table ID
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
@@ -652,6 +654,7 @@ def _query_ga4_semantic_metrics(
         normalized_metric_ids,
         tenant["semantic_profile"],
     )
+    observe_metrics(normalized_metric_ids, resolved_profile)
     profile_resolution = "tenant_registry.ec"
     prepared_metrics: list[dict[str, Any]] = []
     for metric_id in normalized_metric_ids:
@@ -1040,11 +1043,14 @@ def _get_traffic_summary(
     "/traffic-summary",
     dependencies=[Depends(require_rest_oauth)],
 )
+@observed_handler
 def traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
     include_query: bool = False,
+    analysis_goal_hint: GoalInput = None,
+    analysis_subject_hint: SubjectInput = None,
 ):
     try:
         return get_traffic_summary(

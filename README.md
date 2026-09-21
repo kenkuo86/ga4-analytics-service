@@ -401,7 +401,7 @@ python -m unittest discover -s tests -v
 使用分析的已確認政策與資料契約見 [docs/usage-privacy.md](docs/usage-privacy.md)。
 `usage_contract.py`、`telemetry/*.v1.json` 提供版本化 canonical event／摘要附件 schema
 與合成範例。MCP／REST 已將每次驗證後的身分傳入隔離 request context，
-並在 registry／data client 建立前查核共用部門存取政策；尚未開啟收集或建立雲端資源。
+並在 registry／data client 建立前查核共用部門存取政策；預設不收集，雲端資源仍需另行建立。
 資料目標專案為 `ga4-reports-dev`，canonical／summary 保存期限分別為 180／30 天。
 
 啟用 usage 前需從 Secret Manager 注入固定 `USAGE_IDENTITY_KEY`（至少 32 隨機 bytes 的
@@ -415,4 +415,9 @@ Telemetry 關閉不撤掉 auth／tenant boundary。IAM 模式沿用外層 Cloud 
 preflight candidates 不算實際 metrics，explicit dates 不倒推相對措辭或分析 goal。
 摘要採保守詞彙 allowlist：email／電話遮罩，credential／SQL／URL 或未知自由文字
 直接丟棄；最多 500 Unicode 字元。未提供文字時可產生不含客戶名稱的結構化摘要。
-本模組尚待 11.4 接線，optional tool hints／summary 還未改變公開 schema。
+11.4 已加入 MCP 的 optional `request_summary`、`analysis_goal_hint`、`analysis_subject_hint`，
+REST 只提供 enum hints，避免摘要進入 GET URL／access logs。舊 client 可完全省略新欄位。
+
+Usage emission 由 `USAGE_ENABLED` 控制，摘要另由 `USAGE_SUMMARY_ENABLED` 控制，預設都為 false。
+啟用前須完成 [雲端路由驗收](docs/usage-logging.md)，不可直接開關收集而略過 IAM／TTL／告知。
+背景 writer 僅寫 `ga4-reports-dev` 的專用 Cloud Logging log，不在 request 中等待網路或寫 BigQuery。
