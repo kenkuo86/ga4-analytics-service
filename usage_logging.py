@@ -176,7 +176,7 @@ class LoggingWriter:
             from google.auth.transport.requests import AuthorizedSession
             credentials, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/logging.write'])
             self.session = AuthorizedSession(credentials, max_refresh_attempts=0)
-        log = 'ga4_usage_summary_v1' if record['event_name'] == 'analytics_request_summary' else 'ga4_usage_v1'
+        log = 'ga4_mcp_test_summary_v1' if record['event_name'] == 'analytics_request_summary' else 'ga4_mcp_test_v1'
         body = {'logName':f'projects/{self.project}/logs/{log}',
                 'resource':{'type':'global','labels':{'project_id':self.project}},
                 'labels':{'usage_environment':'pilot','usage_schema':'1.0'},

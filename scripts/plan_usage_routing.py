@@ -15,7 +15,7 @@ RETENTIONS = {'events': 180, 'summary': 30}
 def log_filter(kind):
     suffix = 'summary_' if kind == 'summary' else ''
     event = 'analytics_request_summary' if kind == 'summary' else 'analytics_request_completed'
-    return (f'logName="projects/{PROJECT}/logs/ga4_usage_{suffix}v1"\n'
+    return (f'logName="projects/{PROJECT}/logs/ga4_mcp_test_{suffix}v1"\n'
             'resource.type="global"\n'
             f'resource.labels.project_id="{PROJECT}"\n'
             'labels.usage_environment="pilot"\nlabels.usage_schema="1.0"\n'
@@ -28,12 +28,12 @@ def plan(owner):
     result = {'project':PROJECT,'location':LOCATION,'mode':'PLAN_ONLY',
               'datasets':[],'logging_buckets':[],'sinks':[],'iam':[],
               'default_sink_exclusion':{
-                  'sink':'_Default','name':'ga4-usage-isolated-storage',
-                  'filter':f'logName="projects/{PROJECT}/logs/ga4_usage_v1" OR logName="projects/{PROJECT}/logs/ga4_usage_summary_v1"',
+                  'sink':'_Default','name':'ga4-mcp-test-isolated-storage',
+                  'filter':f'logName="projects/{PROJECT}/logs/ga4_mcp_test_v1" OR logName="projects/{PROJECT}/logs/ga4_mcp_test_summary_v1"',
                   'disabled':False,
               }}
     for kind,days in RETENTIONS.items():
-        dataset=f'ga4_usage_{kind}'
+        dataset=f'ga4_mcp_test_{kind}'
         bucket=dataset
         result['datasets'].append({
             'datasetReference':{'projectId':PROJECT,'datasetId':dataset},'location':LOCATION,
@@ -51,7 +51,7 @@ def plan(owner):
             ('bq',f'bigquery.googleapis.com/projects/{PROJECT}/datasets/{dataset}'),
             ('bucket',f'logging.googleapis.com/projects/{PROJECT}/locations/{LOCATION}/buckets/{bucket}'),
         ):
-            sink={'name':f'ga4-usage-{kind}-{target}-v1','destination':destination,
+            sink={'name':f'ga4-mcp-test-{kind}-{target}-v1','destination':destination,
                   'filter':log_filter(kind),'disabled':True}
             if target=='bq':
                 sink['bigqueryOptions']={'usePartitionedTables':True}
@@ -60,16 +60,16 @@ def plan(owner):
             result['sinks'].append(sink)
     result['iam'].extend([
         {'resource':f'projects/{PROJECT}','role':'roles/logging.logWriter','member':f'serviceAccount:{RUNTIME_SA}'},
-        {'resource':f'projects/{PROJECT}/secrets/ga4-usage-identity-key','role':'roles/secretmanager.secretAccessor',
+        {'resource':f'projects/{PROJECT}/secrets/ga4-mcp-test-identity-key','role':'roles/secretmanager.secretAccessor',
          'member':f'serviceAccount:{RUNTIME_SA}'},
     ])
-    result['secret']={'name':'ga4-usage-identity-key','replication_location':LOCATION,
+    result['secret']={'name':'ga4-mcp-test-identity-key','replication_location':LOCATION,
                       'initial_value':'GENERATE_32_RANDOM_BYTES_BASE64_VIA_STDIN_ONLY',
                       'reuse_existing':True,'rotate_automatically':False}
     result['table_requirements']={
         'partition_field':'timestamp','partition_type':'DAY','requirePartitionFilter':True,
-        'raw_tables':['ga4_usage_events.ga4_usage_v1','ga4_usage_summary.ga4_usage_summary_v1'],
-        'also_verify':['ga4_usage_events.export_errors','ga4_usage_summary.export_errors'],
+        'raw_tables':['ga4_mcp_test_events.ga4_mcp_test_v1','ga4_mcp_test_summary.ga4_mcp_test_summary_v1'],
+        'also_verify':['ga4_mcp_test_events.export_errors','ga4_mcp_test_summary.export_errors'],
         'seed_policy':'SYNTHETIC_ONLY; preserve event_time; labels.usage_validation=true',
     }
     result['enablement']={
@@ -93,8 +93,8 @@ def plan(owner):
 
 def dedup_sql(kind, payload_fields):
     days=RETENTIONS[kind]
-    dataset=f'{PROJECT}.ga4_usage_{kind}'
-    table='ga4_usage_summary_v1' if kind=='summary' else 'ga4_usage_v1'
+    dataset=f'{PROJECT}.ga4_mcp_test_{kind}'
+    table='ga4_mcp_test_summary_v1' if kind=='summary' else 'ga4_mcp_test_v1'
     event='analytics_request_summary' if kind=='summary' else 'analytics_request_completed'
     projections=[]
     for field in payload_fields:

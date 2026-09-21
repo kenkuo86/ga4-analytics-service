@@ -8,7 +8,7 @@
 ```bash
 .venv/bin/python scripts/plan_usage_routing.py \
   --owner-principal 'user:YOUR_WORKSPACE_EMAIL' \
-  --output-dir /tmp/ga4-usage-routing-plan
+  --output-dir /tmp/ga4-mcp-test-routing-plan
 ```
 
 產出 `usage-routing-plan.json`、`events-dedup.sql`、`summary-dedup.sql`；不登入、不連線、不建立
@@ -16,14 +16,14 @@
 
 | 資源 | 名稱 | 保存／權限 |
 | --- | --- | --- |
-| BigQuery dataset | ga4_usage_events | 180天partition TTL；明確owner ACL，不使用預設projectReaders／projectWriters |
-| BigQuery dataset | ga4_usage_summary | 30天partition TTL；摘要及export_errors都留此短期dataset |
-| Logging buckets | ga4_usage_events、ga4_usage_summary | 180／30天，不鎖定以保留核准刪除能力 |
-| Logging sinks | ga4-usage-{events,summary}-{bq,bucket}-v1 | 4個filter限定logName、project、pilot、schema1.0、event_name；初始停用 |
+| BigQuery dataset | ga4_mcp_test_events | 180天partition TTL；明確owner ACL，不使用預設projectReaders／projectWriters |
+| BigQuery dataset | ga4_mcp_test_summary | 30天partition TTL；摘要及export_errors都留此短期dataset |
+| Logging buckets | ga4_mcp_test_events、ga4_mcp_test_summary | 180／30天，不鎖定以保留核准刪除能力 |
+| Logging sinks | ga4-mcp-test-{events,summary}-{bq,bucket}-v1 | 4個filter限定logName、project、pilot、schema1.0、event_name；初始停用 |
 | Runtime SA | ga4-analytics-service@ga4-reports-dev.iam.gserviceaccount.com | 新增project logging.logWriter、單一secret的secretAccessor；不授BigQuery寫入 |
 | Sink writer | 建立BQ sink後取得writerIdentity | 只授對應dataset bigquery.dataEditor，不授project層級 |
-| Secret Manager | ga4-usage-identity-key | 32隨機bytes以base64保存；stdin寫入、不列印，不重用OAuth signing key、不自動輪替 |
-| _Default sink exclusion | ga4-usage-isolated-storage | 只排除兩個專用usage logs；保留既有所有exclusions與其他access／error logs |
+| Secret Manager | ga4-mcp-test-identity-key | 32隨機bytes以base64保存；stdin寫入、不列印，不重用OAuth signing key、不自動輪替 |
+| _Default sink exclusion | ga4-mcp-test-isolated-storage | 只排除兩個專用usage logs；保留既有所有exclusions與其他access／error logs |
 
 原始資料直接存取限owner；已核准的上層GCP管理員與管理用SA繼承權限維持。
 不新增一般同事、dashboard reader或pipeline SA；11.6再依具體job／views另給最小權限。

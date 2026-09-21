@@ -35,10 +35,10 @@ class RoutingPlanTests(unittest.TestCase):
             self.assertIn('labels.usage_schema="1.0"',sink['filter'])
             self.assertIn('labels.usage_environment="pilot"',sink['filter'])
             if 'summary' in sink['name']:
-                self.assertIn('/ga4_usage_summary',sink['destination'])
+                self.assertIn('/ga4_mcp_test_summary',sink['destination'])
                 self.assertIn('analytics_request_summary',sink['filter'])
                 self.assertNotIn('analytics_request_completed',sink['filter'])
-        self.assertIn('ga4_usage_summary_v1',plan['default_sink_exclusion']['filter'])
+        self.assertIn('ga4_mcp_test_summary_v1',plan['default_sink_exclusion']['filter'])
         self.assertFalse(plan['default_sink_exclusion']['disabled'])
 
     def test_runtime_never_gets_bigquery_data_writer_or_reader(self):
