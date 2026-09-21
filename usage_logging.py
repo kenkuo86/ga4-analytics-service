@@ -180,7 +180,10 @@ class LoggingWriter:
         body = {'logName':f'projects/{self.project}/logs/{log}',
                 'resource':{'type':'global','labels':{'project_id':self.project}},
                 'labels':{'usage_environment':'pilot','usage_schema':'1.0'},
-                'entries':[{'timestamp':record['event_time'],'insertId':record['interaction_id'], 'jsonPayload':record}]}
+                # Logging deduplicates by project/timestamp/insertId, even across log names.
+                # Keep retries stable while distinguishing the canonical event and attachment.
+                'entries':[{'timestamp':record['event_time'],
+                            'insertId':f"{record['interaction_id']}:{record['event_name']}", 'jsonPayload':record}]}
         response = self.session.post('https://logging.googleapis.com/v2/entries:write', json=body, timeout=2)
         response.raise_for_status()
 

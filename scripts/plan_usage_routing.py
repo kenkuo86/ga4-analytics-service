@@ -111,7 +111,10 @@ def dedup_sql(kind, payload_fields):
         elif field['type']=='TIMESTAMP':
             value=f'SAFE_CAST({value} AS TIMESTAMP)'
         elif field['type']=='INT64':
-            value=f'SAFE_CAST({value} AS INT64)'
+            # Logging exports JSON numbers as FLOAT, so JSON_VALUE can return "7.0".
+            # Parse decimal notation, but reject fractional or out-of-range counters.
+            decimal=f'SAFE_CAST({value} AS BIGNUMERIC)'
+            value=f'SAFE_CAST(IF({decimal} = TRUNC({decimal}), {decimal}, NULL) AS INT64)'
         projections.append(f'  {value} AS {name}')
     return f'''-- Generated from versioned logical payload contract; no raw payload projection or text joins.
 -- Requires synthetic ingestion/schema verification before cloud execution.

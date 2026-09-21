@@ -1,7 +1,7 @@
-# Phase 11.5 雲端資源建立計畫（尚未 apply）
+# Phase 11.5 雲端資源與驗收紀錄
 
 資料專案固定 `ga4-reports-dev`、地區 `asia-east1`，符合現有 Cloud Run 與 datasets 地區。
-此分支只提供離線資源 manifest 與 dedup table functions，不能宣稱 routing／IAM／TTL 已完成。
+此分支提供離線資源 manifest 與 dedup table functions；實際執行結果另列，未驗證項目不視為完成。
 
 ## 授權與執行狀態
 
@@ -12,11 +12,13 @@ Owner 已核准本文件所列 `ga4_mcp_test_*`／`ga4-mcp-test-*` 資源建立�
 建立前重新盤點發現：`dev-dataform-workflow-executor@ga4-reports-dev.iam.gserviceaccount.com`
 持有 project 級 `roles/bigquery.dataEditor`，包含 tables.getData／updateData／export／delete。
 因此新 dataset 即使只有明確 owner ACL，此 Dataform pipeline SA 仍可讀寫原始事件與摘要。
-這項 pipeline 存取尚待 owner 確認是否納入既有管理員／管理用 SA 例外；暫停建立資源，
-未變更任何 cloud IAM、未建立資源或寫入合成事件，也不自行撤銷 Dataform 既有權限。
+Owner 已明確同意此 Dataform pipeline SA 納入繼承權限例外，保留既有權限。
+資源建立與合成驗收已獲准；不自行撤銷 Dataform、GA4 或其他既有權限。
 
 本次唯讀盤點另確認無同名 dataset／bucket／sink／secret；project／folder／organization
 只有 _Default／_Required sinks，未發現 includeChildren 的額外上層複製路由。
+
+實際建立、驗收結果與待決策事項見[合成驗收紀錄](usage-routing-validation.md)。
 
 ## 可審閱計畫
 

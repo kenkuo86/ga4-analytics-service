@@ -64,7 +64,8 @@ class RoutingPlanTests(unittest.TestCase):
             if kind=='events':
                 self.assertIn('CAST(NULL AS STRING) AS request_summary',sql)
                 self.assertNotIn("JSON_VALUE(payload, '$.request_summary')",sql)
-                self.assertIn("SAFE_CAST(JSON_VALUE(payload, '$.requested_days') AS INT64)",sql)
+                self.assertIn("SAFE_CAST(JSON_VALUE(payload, '$.requested_days') AS BIGNUMERIC)",sql)
+                self.assertIn(' = TRUNC(',sql)
                 self.assertIn("JSON_VALUE(payload, '$.tenant_id') AS tenant_id",sql)
                 self.assertIn('BETWEEN 0 AND 179',sql)
             else:
