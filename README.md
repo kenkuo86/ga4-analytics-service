@@ -421,3 +421,7 @@ REST 只提供 enum hints，避免摘要進入 GET URL／access logs。舊 clien
 Usage emission 由 `USAGE_ENABLED` 控制，摘要另由 `USAGE_SUMMARY_ENABLED` 控制，預設都為 false。
 啟用前須完成 [雲端路由驗收](docs/usage-logging.md)，不可直接開關收集而略過 IAM／TTL／告知。
 背景 writer 僅寫 `ga4-reports-dev` 的專用 Cloud Logging log，不在 request 中等待網路或寫 BigQuery。
+
+11.5 的離線[資源計畫與驗收順序](docs/usage-routing.md)可由
+`scripts/plan_usage_routing.py`產生。尚未apply；建立dataset／sink／IAM／secret及平台備援
+保存例外仍須owner核准，不能直接視為已完成routing。
