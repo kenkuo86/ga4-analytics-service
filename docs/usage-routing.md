@@ -3,6 +3,21 @@
 資料專案固定 `ga4-reports-dev`、地區 `asia-east1`，符合現有 Cloud Run 與 datasets 地區。
 此分支只提供離線資源 manifest 與 dedup table functions，不能宣稱 routing／IAM／TTL 已完成。
 
+## 授權與執行狀態
+
+Owner 已核准本文件所列 `ga4_mcp_test_*`／`ga4-mcp-test-*` 資源建立及合成驗收，
+並同意 BigQuery active TTL 後 2 天 time travel 與 7 天 fail-safe 例外。
+不包含部署或啟用真實收集。
+
+建立前重新盤點發現：`dev-dataform-workflow-executor@ga4-reports-dev.iam.gserviceaccount.com`
+持有 project 級 `roles/bigquery.dataEditor`，包含 tables.getData／updateData／export／delete。
+因此新 dataset 即使只有明確 owner ACL，此 Dataform pipeline SA 仍可讀寫原始事件與摘要。
+這項 pipeline 存取尚待 owner 確認是否納入既有管理員／管理用 SA 例外；暫停建立資源，
+未變更任何 cloud IAM、未建立資源或寫入合成事件，也不自行撤銷 Dataform 既有權限。
+
+本次唯讀盤點另確認無同名 dataset／bucket／sink／secret；project／folder／organization
+只有 _Default／_Required sinks，未發現 includeChildren 的額外上層複製路由。
+
 ## 可審閱計畫
 
 ```bash
@@ -58,8 +73,8 @@ Ledger的量測起點與固定周年到期日在pilot啟用前建立，本計畫
   第31天摘要不可查，過期重送不復活；正常表、export_errors、Logging buckets、匯出副本都驗證。
 - BigQuery time travel設定最小48小時，另有平台fail-safe保護；Logging也有平台清理行為。
   **本manifest的180／30天只設定active partition TTL，仍可能有可復原的歷史副本。**
-  這與ROADMAP「所有副本均同期限或更短」原文有差異，尚待owner核准平台備援保留例外；
-  未核准不得apply或啟用真實收集，不能用view隱藏或文件改寫代替批准。
+  這與ROADMAP「所有副本均同期限或更短」原文有差異，owner已明確核准此平台備援保留例外；
+  真實收集仍須完成後續驗收，不以view隱藏代替實際保存政策。
 - usage query與GA4 job共用billing project quota。驗收SQL先dry-run，查詢initial maximum_bytes_billed
   設100MB，每次只查合成事件的短窗口；這是初始工程限制，不代表已核准營運預算。
 - API存取、Streaming、Logging retention與查詢可能新增費用，尚未量測成本。
