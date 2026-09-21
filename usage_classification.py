@@ -90,7 +90,7 @@ def classify(
         result.update(explicit_period(parsed_start, parsed_end))
         subjects = set()
         # Bounds before iteration; no arbitrary caller strings can become metric IDs.
-        if isinstance(resolved_metric_ids, (tuple, list)) and len(resolved_metric_ids) <= 5 and resolved_profile in semantic_catalog.profiles:
+        if isinstance(resolved_metric_ids, (tuple, list)) and len(resolved_metric_ids) <= 5 and isinstance(resolved_profile, str) and resolved_profile in semantic_catalog.profiles:
             for metric_id in resolved_metric_ids:
                 if not isinstance(metric_id, str) or len(metric_id) > 128:
                     continue
@@ -140,9 +140,9 @@ _SUMMARY_WORDS = (
     "本月", "最近", "過去", "天", "日", "週", "月", "年", "與", "至", "的", "請", "幫我",
     "sessions", "users", "traffic", "summary", "compare", "trend", "[redacted]",
 )
-_SAFE_SUMMARY = re.compile(r"(?:" + "|".join(re.escape(s) for s in sorted(_SUMMARY_WORDS, key=len, reverse=True)) + r"|\d{4}-\d{2}-\d{2}|\d{1,3}|[\s，。、：；,.:;()（）/\-])+\Z")
+_SUMMARY_TOKEN = re.compile(r"(?:" + "|".join(re.escape(s) for s in sorted(_SUMMARY_WORDS, key=len, reverse=True)) + r"|(?<![A-Za-z0-9])\d{4}-\d{2}-\d{2}(?!\d)|(?<![A-Za-z0-9])\d{1,3}(?!\d)|[\s，。、：；,.:;()（）/\-])")
 _EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_PHONE = re.compile(r"(?<!\d)(?:\+?\d[\d ()-]{6,}\d)(?!\d)")
+_PHONE = re.compile(r"(?<![A-Za-z0-9])(?:\+?\d[\d ()./\-]{6,}\d)(?!\d)")
 _DANGER = re.compile(r"(?i)authorization|bearer|cookie|secret|password|credential|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|private[_ -]?key|-----BEGIN|\bSELECT\b|\bWITH\b|https?://|eyJ[A-Za-z0-9_-]+\.")
 
 
@@ -162,8 +162,12 @@ def sanitize_summary(value: object) -> str | None:
     value = _PHONE.sub("[redacted]", value)
     for i, text in enumerate(dates):
         value = value.replace("DATEPLACEHOLDER" + chr(0xE000 + i), text)
-    if not _SAFE_SUMMARY.fullmatch(value):
-        return None
+    position = 0
+    while position < len(value):
+        match = _SUMMARY_TOKEN.match(value, position)
+        if match is None:
+            return None
+        position = match.end()
     value = value.strip()[:500]
     return value or None
 

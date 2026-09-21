@@ -1,5 +1,7 @@
 from datetime import date
 import unittest
+import subprocess
+import sys
 
 from capability_registry import capability_registry
 from period_contract import resolve_period_intent
@@ -81,6 +83,8 @@ class ClassificationTests(unittest.TestCase):
             self.assertEqual(result['analysis_goal'],'unknown')
             self.assertEqual(result['analysis_subject'],'traffic')
             self.assertEqual(result['intent_source'],'server_rule')
+        for profile in ([], {}, None):
+            self.assertEqual(classify('query_ga4',resolved_profile=profile)['metrics'],[])
         self.assertEqual(classify('query_ga4',subject_hint='cross_source')['analysis_subject'],'unknown')
         result = classify('query_ga4',goal_hint='diagnosis')
         self.assertEqual(result['analysis_goal'],'diagnosis')
@@ -98,6 +102,18 @@ class SummaryTests(unittest.TestCase):
                     'GA4 👨‍👩‍👧',None,{'secret':'value'},'x'*8193):
             self.assertIsNone(sanitize_summary(raw))
         self.assertEqual(len(sanitize_summary('查詢'*300)),500)
+        for raw in ('users0912345678','sessions2125550123','users123.456.789'):
+            self.assertIsNone(sanitize_summary(raw))
+        for phone in ('0912.345.678','212.555.0123','0912/345/678','+886 (912) 345-678'):
+            self.assertEqual(sanitize_summary('GA4 '+phone),'GA4 [redacted]')
+
+    def test_adversarial_summary_finishes_within_subprocess_deadline(self):
+        subprocess.run([sys.executable, '-c',
+            "from usage_classification import sanitize_summary; "
+            "assert sanitize_summary('1234567.'*4+'X') is None; "
+            "assert sanitize_summary('1234567.'*1000+'X') is None; "
+            "assert sanitize_summary('查詢'*4000+'X') is None"], check=True, timeout=3)
+
 
     def test_source_and_unsafe_summary_never_fall_back_to_raw(self):
         classification = classify('traffic_summary',parsed_start=date(2026,9,1),parsed_end=date(2026,9,7))
