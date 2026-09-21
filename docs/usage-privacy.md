@@ -2,7 +2,7 @@
 
 本文件記錄 repository owner 於 2026-09-18 在實作對話確認的政策。
 11.1 提供可執行 contract、schema 與合成案例；11.2 接上 per-request 身分與政策查核。
-尚未開啟收集或部署資源。
+已依 owner 授權建立 POC 雲端資源，尚未部署或開啟真實資料收集。
 
 ## 身分、用途與存取
 
@@ -12,7 +12,8 @@
   此呈現門檻在 11.6 發布前由 owner 確認，目前不對部門開放報表。
   Owner 已確認接受既有 GCP 管理員與管理用 SA 的繼承管理存取權例外；
   不撤銷既有 Owner／Editor，也不額外授予一般同事原始資料讀取權。
-  Dataset IAM 不能覆蓋上層繼承權限，後续 rollout 須重新盤點 drift。
+  此例外也包含已核准的 Dataform workflow executor 專案級 BigQuery Data Editor。
+  Dataset IAM 不能覆蓋上層繼承權限，後續 rollout 須重新盤點 drift。
 - Owner 已確認 OAuth allowlist 內所有同事可讀同一集合的全部 active tenants。
   政策代碼 `department-active-tenants-v1`；不是對未登入者或任意 Google Workspace
   帳號開放。保留既有 allowlist、scope、active 狀態及名稱解析邊界。
@@ -32,6 +33,13 @@
 | Canonical 結構化事件 | 180 天，以原事件時間起算 | 專用 log／BigQuery dataset |
 | 已清理摘要附件 | 30 天，以相同原事件時間起算 | 獨立 log、bucket、dataset；不進長期副本 |
 | Activation ledger | 量測起點後一個曆年 | 獨立 table，到固定期限清除，不隨回訪展延 |
+
+Owner 已核准以下 POC 平台保存例外：
+
+- BigQuery active TTL 後仍有 2 天 time travel 與 7 天 fail-safe。
+- 過期資料若繞過應用程式拒送檢查重送，可能暫留 BQ 串流區，原始資料管理者仍可查詢；
+  平台不保證清理時間。接受此延遲不等於延長所有正常資料期限；應用程式繼續拒送過期資料，
+  分析函數繼續依原事件時間排除，亦不得另做未核准長期副本。
 
 使用資料與衍生資料存放在 `ga4-reports-dev`。Ledger 僅含 pseudonymous user_id、
 first_success_at、measurement_version；例如起點為 2026-10-01T00:00:00Z，
@@ -88,8 +96,8 @@ timestamp、jsonPayload 及 Logging 欄位名稱轉換，不可直接拿 payload
 
 ## 發布前與後續工作
 
-11.3–11.7 仍需實作與驗證：summary sanitizer、分類、
-failure-isolated emission、Cloud Logging／BigQuery 分流、ledger、KPI views、pilot。
+11.1–11.4 已實作；11.5 雲端資源與部分合成驗收完成，實際存取權限驗收尚未完成。
+11.6 ledger／KPI views 與 11.7 pilot 仍需實作驗證。
 未完成 host 實測不可宣稱 Claude／ChatGPT 行為已驗收。
 
 雲端 apply 前由 owner 授權具體資源與 IAM；目前不授 runtime SA BigQuery 寫入權。

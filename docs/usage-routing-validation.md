@@ -32,7 +32,7 @@
 3. 更新 unique writerIdentity 的 sink 時，API 要保留 `uniqueWriterIdentity=true`。
    首次 update 被拒絕後修正參數成功；沒有變更 writer 身分或擴大角色。
 
-## 未通過／待決策
+## 已核准例外與後續驗收
 
 ### 過期重送與串流暫存
 
@@ -43,11 +43,12 @@ Logging API 接受請求，BQ 原始表仍各可查到 1 筆過期合成資料�
 這與 BigQuery 對舊日期串流資料先放入 `__UNPARTITIONED__`、稍後移入分區的行為一致；
 官方對移出時間沒有 SLA。**不能宣稱 TTL 會在舊事件剛重送時就立即排除原始表中的資料。**
 正式函數的時間條件及 application expiry guard 可阻擋一般分析／發送，但不能代替底層副本
-驗收，也不等於 owner 已核准此 active streaming buffer 例外。
+驗收。Owner 在了解實際情境後，已明確核准此 POC active streaming buffer 清理延遲例外。
 
 Owner 已核准的 2 天 time travel＋7 天 fail-safe 是資料到期後的復原副本；此處是仍可直接
-查詢的串流暫存，屬不同例外。暫停後續實作與真實收集，待 owner 決定是否接受 POC 平台
-清理延遲，或重新設計 ingestion／保存架構。此紀錄是當下快照，未經長期到期演練。
+查詢的串流暫存，屬不同且已另行核准的 POC 例外。繼續保持 application expiry guard、
+函數時間範圍與原始 TTL，不藉例外做長期複製。後續追蹤查詢確認兩張原始表與兩張錯誤表
+的過期合成資料均為 0；這只證明本次已清除，不代表平台有固定清理期限或已做長期到期演練。
 
 ### _Default 排除規則傳播
 
@@ -59,17 +60,45 @@ Owner 已核准的 2 天 time travel＋7 天 fail-safe 是資料到期後的復�
 前必須增加「排除規則已實際生效」的合成驗收關卡，不能只看 API 回覆成功即開始發送。
 現階段原始／錯誤／日誌驗收資料保留供審查，未自動清除或刪除資源。
 
+後續 readiness probe 已實測通過：同一新 interaction ID 在兩個專用 Logging bucket
+各 1 筆，在 `_Default` 為 0 筆；同組事件在兩張 BQ 原始表亦各 1 筆，
+該查詢預估處理 312 bytes、實際計費 20 MiB（BQ 最低計費單位），低於 100 MB 上限。
+驗收結束四條 sinks 均已停用。前一輪在啟用後立即發出的
+probe 未到達，未將其列為通過。未來啟用前須使用有次數上限的合成 probe 確認路由及排除
+規則真正生效，而非只等待固定秒數。
+
 ### 權限正反向測試
 
 設定檢查已完成，但目前 owner CLI 身分呼叫 runtime SA generateAccessToken 回傳 403，
 因此未能以該 SA 實際執行讀寫拒絕驗收；也未代替一般同事登入測試。沒有自行新增
 Token Creator 或 impersonation 權限。此兩項不得標示為通過，需在後續驗收安排執行身分。
 
+#### 待授權的 runtime SA 驗收計畫
+
+- 在單一 `ga4-analytics-service@ga4-reports-dev.iam.gserviceaccount.com` 的 IAM policy
+  暫加 `user:kenkuo@wenk-media.com` 的 `roles/iam.serviceAccountTokenCreator`。不在
+  project 層授權，不修改 SA 的既有 BQ／Secret 權限。
+- Binding 加 `request.time < timestamp(...)` 條件，截止為實際開始後 1 小時；保留
+  原始 policy、合併既有 bindings，使用 etag。此權限允許以該 SA 身分操作其既有資源，
+  本次只用於以下 POC 驗收，不查真實 tenant data。
+- 只 mint 最長 5 分鐘的短期 access token，存在記憶體，不建立 service account key、
+  不寫 ADC、不輸出 token、不把 token 放入 shell argument。
+- 使用該 SA 寫 1 組標記 synthetic 的 Logging 事件／摘要；owner 身分驗證專用目的地
+  到達與 `_Default` 排除。直接讀兩張 POC BQ 原始表應回 403；對兩張原始表的
+  write 權限與單一 secret 的 access 權限使用 testIamPermissions 驗證，不讀 secret 值。
+- 不以預期拒絕為理由執行刪除或授權變更測試。不代替一般員工登入，也不把 SA 的
+  驗收當成全體員工權限驗收；一般員工反例仍於 pilot 安排。
+- 成功或失敗都停用測試 sinks，重新讀 IAM policy、僅移除本次 conditional binding，
+  保留他人同期變更；確認已移除。移除 binding 不使已發 token 立即失效，token 最遲
+  於發出後 5 分鐘到期。即使過程中斷，binding 的 1 小時期限也不自動展延。
+
+此新增 impersonation 授權尚未獲 owner 同意，因此目前不執行。
+
 ## 實際指令與證據
 
 本機操作／原始 API 設定快照位於 `/private/tmp/ga4-mcp-test-cloud-audit/`，不含 access token
 或 secret 值。合成 fixture SQL 位於 `/private/tmp/ga4-mcp-test-routing-plan/`；不可把暫存
-目錄當永久備份。本文件記錄關鍵結果，後续重跑應重新產生並審閱 fixture。
+目錄當永久備份。本文件記錄關鍵結果，後續重跑應重新產生並審閱 fixture。
 
 ```bash
 # 離線產生計畫與 SQL
@@ -104,7 +133,7 @@ git diff --check
 ```
 
 上述完整測試 216 項通過；修正後獨立 reviewer 重跑 logging 10 項與 routing 5 項，無 P0／P1。
-TTL acceptance 仍未通過。查詢回報 totalBytesBilled=0（當時資料在串流區），這不代表 Logging、
+嚴格立即清理不成立，依 owner 已核准的 POC 例外揭露；IAM 正反向驗收仍待執行。查詢回報 totalBytesBilled=0（當時資料在串流區），這不代表 Logging、
 Secret Manager 或後續查詢免費，也不能當營運成本估算。
 
 官方依據：

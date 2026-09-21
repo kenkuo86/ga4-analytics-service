@@ -424,4 +424,4 @@ Usage emission 由 `USAGE_ENABLED` 控制，摘要另由 `USAGE_SUMMARY_ENABLED`
 
 11.5 的離線[資源計畫與驗收順序](docs/usage-routing.md)可由
 `scripts/plan_usage_routing.py`產生。已獲授權建立資源並完成部分[合成驗收](docs/usage-routing-validation.md)；
-過期重送在BQ串流暫存仍可查，保存政策例外待決策。四條路由已停用，未部署或啟用真實收集。
+過期重送在BQ串流暫存仍可查，owner已接受此POC保存例外；仍拒送／排除過期資料。四條路由已停用，未部署或啟用真實收集。

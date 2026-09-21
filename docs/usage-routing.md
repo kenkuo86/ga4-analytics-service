@@ -7,6 +7,7 @@
 
 Owner 已核准本文件所列 `ga4_mcp_test_*`／`ga4-mcp-test-*` 資源建立及合成驗收，
 並同意 BigQuery active TTL 後 2 天 time travel 與 7 天 fail-safe 例外。
+另已核准 POC 過期重送的 BQ 串流暫存清理延遲例外；仍拒送過期資料並在分析函數排除。
 不包含部署或啟用真實收集。
 
 建立前重新盤點發現：`dev-dataform-workflow-executor@ga4-reports-dev.iam.gserviceaccount.com`
