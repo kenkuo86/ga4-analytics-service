@@ -9,7 +9,28 @@ rollout 門檻為 **canonical 事件送達 BigQuery ≥ 95%，以 Wilson 95% 信
 summary 附件只揭露、不設門檻（沒有任何 KPI 計數依賴它）。判定由
 `scripts/probe_usage_routing.py` 的 `gate_check` 產出，不靠人工敘述。
 
-## 2026-09-22 第二輪 review 修正（最新）
+## 2026-09-22 系統性 review 修正（最新）
+
+前兩輪修正逐一處理目的地輪詢與退出碼後，第三輪 review 顯示仍有兩個共同根因：
+可選的 Monitoring counter 會中止已完成的權威查核；主流程例外與 sink cleanup 例外
+同時發生時，`finally` 會重新拋出原例外而遮蔽 cleanup 狀態。本輪改為集中處理終端狀態：
+
+- Logging／BigQuery exact-key 結果是權威證據；Monitoring `timeSeries` 是輔助證據。
+  Monitoring 查詢或解析失敗時記錄 `status=unavailable` 與錯誤型別，保留 gate 結果，
+  不因輔助指標不可用而中止驗收。
+- `final_exit_code` 統一所有執行路徑的優先序：cleanup 未確認為 disabled 回傳 3；
+  主流程失敗回傳 2；只有完整結果才進入 delivery gate。主流程與 cleanup 同時失敗時，
+  以 `cleanup_failed`／3 為最終結果，並保存 `probe-final-status.json`。
+- `cleanup_sinks` 獨立保存每次嘗試與最終狀態；不再依賴 `finally` 後仍能執行的旗標。
+- `docs/usage-routing-resource-evidence.md` 固定去識別化的 raw table schema／TTL 證據。
+  labels 以 nullable RECORD 欄位參照；plan 移除不必要的 `defaultTableExpirationMs`，
+  dedup／probe SQL 若 schema drift 會顯式失敗，不靜默放行 validation probe。
+
+新增主流程成功／失敗 × cleanup 成功／失敗、Monitoring 不可用、schema shape contract
+與 cleanup evidence 的測試。routing **56** 項、完整 regression **267** 項全部通過，
+compileall 與 diff check 通過。新版雲端驗收未執行；等待下一輪獨立 review。
+
+## 2026-09-22 第二輪 review 修正
 
 針對 `eb7b6a4` 的兩項新 P1：
 
@@ -42,16 +63,11 @@ BigQuery job 未完成或仍有 pageToken 的讀取不作為完整 readiness 證
 舊 readiness 只確認 Logging buckets，不能據此宣稱已先確認四個目的地；新版雲端
 重跑尚未執行，先等待新一輪 Codex review，不將 PR 宣告可合併。
 
-另三則自動 review 意見經核對未採納：
-
-- Dataset API 明訂同時設定 `defaultPartitionExpirationMs` 時，新分區表不繼承
-  `defaultTableExpirationMs`。既有四張表的 metadata 快照也不是 30／180 天整表到期。
-- 兩張 raw table 的實際 schema 快照中 `labels` 為 NULLABLE RECORD，欄位包含
-  `usage_validation`，不是 repeated key/value；故目前 JSON object 路徑無須改成 UNNEST。
-  實際 probe BQ 查詢已有 300/300 結果，dedup 合成排除亦有先前驗收紀錄。
-- 依據：[BigQuery Dataset API](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets)；
-  本機快照為 `/private/tmp/ga4-mcp-test-cloud-audit/` 下兩份 raw `*-schema.json`
-  與四份 `*-partition-verified.json`。暫存快照不視為永久證據，未來重跑仍須重新查核 schema。
+原先三則 vendor/schema review 意見沒有直接當成程式錯誤，而是在本輪轉成可重複的
+repository contract：移除 `defaultTableExpirationMs`、固定 nullable RECORD 欄位參照，
+並把去識別化 metadata 放入 `docs/usage-routing-resource-evidence.md`。官方依據為
+[BigQuery Dataset API](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets)。
+暫存快照不視為永久證據，下一次 apply 前仍須重新查核 schema／TTL。
 
 本輪本機驗收指令（於 routing worktree 執行；共用主 workspace 的 virtualenv）：
 

@@ -39,7 +39,6 @@ def plan(owner):
             'datasetReference':{'projectId':PROJECT,'datasetId':dataset},'location':LOCATION,
             'description':f'Phase 11 {kind}: active partition TTL {days} days; recovery copies follow platform policy',
             'defaultPartitionExpirationMs':str(days*86400000),
-            'defaultTableExpirationMs':str(days*86400000),
             'maxTimeTravelHours':'48',
             # Explicit ACL; do not copy BigQuery's default projectReaders/projectWriters.
             'access':[{'role':'OWNER','userByEmail':owner.removeprefix('user:')}],
@@ -127,7 +126,9 @@ WITH bounded AS (
     AND timestamp < TIMESTAMP(DATE_ADD(range_end, INTERVAL 1 DAY), 'Asia/Taipei')
     AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY)
     AND DATE_DIFF(range_end, range_start, DAY) BETWEEN 0 AND {days-1}
-    AND COALESCE(JSON_VALUE(TO_JSON(labels), '$.usage_validation'), 'false') != 'true'
+    -- Exported usage labels are a nullable RECORD. Keep this field reference
+    -- shape-checked: a schema drift must fail the query, never admit probes.
+    AND COALESCE(labels.usage_validation, 'false') != 'true'
 ), typed AS (
 SELECT
 {',\n'.join(projections)},

@@ -193,7 +193,8 @@ class BigQueryReconciliationTests(unittest.TestCase):
                                        '2026-09-22T03:00:00Z', '2026-09-22T04:00:00Z')
         self.assertIn(f'FROM `{table}`', sql)
         self.assertIn("timestamp >= TIMESTAMP('2026-09-22T03:00:00Z')", sql)
-        self.assertIn(f"'$.usage_probe_run') = '{self.IDENT}'", sql)
+        self.assertIn(f"labels.usage_probe_run = '{self.IDENT}'", sql)
+        self.assertNotIn('JSON_VALUE(TO_JSON(labels)', sql)
         for bad_table in ('ga4-reports-dev.other.table', 'ga4_mcp_test_events.ga4_mcp_test_v1'):
             with self.assertRaises(ValueError):
                 probe.bigquery_check_sql(bad_table, self.IDENT,

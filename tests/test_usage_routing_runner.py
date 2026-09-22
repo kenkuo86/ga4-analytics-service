@@ -98,7 +98,7 @@ class ReadinessTests(unittest.TestCase):
 
 
 class CleanupTests(unittest.TestCase):
-    def run_main(self, cloud):
+    def run_main(self, cloud, measure_error=None):
         result = {'summary': {'verdict': 'MEASURED'},
                   'bigquery': {'summary': {'verdict': 'MEASURED'},
                                'gate': {'status': 'PASS'}}, 'export_metrics': {}}
@@ -107,10 +107,13 @@ class CleanupTests(unittest.TestCase):
             fixture.write_text(json.dumps(FIXTURE))
             argv = ['probe', '--apply', '--enable-sinks', '--output-dir', directory,
                     '--fixture', str(fixture), '--settle-seconds', '0']
+            measure_patch = (patch.object(runner, 'measure', side_effect=measure_error)
+                             if measure_error is not None else
+                             patch.object(runner, 'measure', return_value=result))
             with patch.object(runner.sys, 'argv', argv), \
                     patch.object(runner, 'Cloud', return_value=cloud), \
                     patch.object(runner, 'await_routing_ready', return_value=([], [])), \
-                    patch.object(runner, 'measure', return_value=result) as measure, \
+                    measure_patch as measure, \
                     patch.object(runner.time, 'sleep'), patch('builtins.print'):
                 return runner.main(), measure.call_count
 
@@ -134,10 +137,25 @@ class CleanupTests(unittest.TestCase):
         # Capture the real method before run_main patches the Cloud constructor.
         toggle = runner.Cloud.toggle_sinks
         cloud.toggle_sinks.side_effect = lambda enabled: toggle(cloud, enabled)
-        with self.assertRaisesRegex(RuntimeError, 'second enable failed'):
-            self.run_main(cloud)
+        self.assertEqual(self.run_main(cloud)[0], 2)
         self.assertEqual(len(enabled), 1)
         self.assertEqual(disabled, set(probe.SINKS))
+
+    def test_body_failure_and_cleanup_failure_prioritizes_cleanup_status(self):
+        cloud = Mock()
+        cloud.toggle_sinks.side_effect = [{}, RuntimeError('offline'),
+                                         RuntimeError('offline'), RuntimeError('offline')]
+        status, measurements = self.run_main(cloud, RuntimeError('measurement failed'))
+        self.assertEqual(status, 3)
+        self.assertEqual(measurements, 1)
+        self.assertEqual(cloud._refresh_owner_token.call_count, 3)
+
+    def test_body_failure_with_successful_cleanup_returns_body_failure(self):
+        cloud = Mock()
+        cloud.toggle_sinks.side_effect = [{}, dict.fromkeys(probe.SINKS, True)]
+        status, measurements = self.run_main(cloud, RuntimeError('measurement failed'))
+        self.assertEqual(status, 2)
+        self.assertEqual(measurements, 1)
 
     def test_disable_exhaustion_returns_failure_despite_passing_delivery(self):
         cloud = Mock()
@@ -165,12 +183,15 @@ class CleanupTests(unittest.TestCase):
 
 class MeasurementTests(unittest.TestCase):
     def run_measurement(self, delayed_event=None, arrive_on=2, incomplete=False,
-                        logging_complete=True):
+                        logging_complete=True, export_error=None):
         cloud = Mock()
         records = probe.build_records(FIXTURE, 100)
         expected = probe.expected_bq_keys(records)
         cloud.write_probe.side_effect = lambda r, run: dict(r, ok=True)
-        cloud.export_metrics.return_value = {}
+        if export_error is None:
+            cloud.export_metrics.return_value = {}
+        else:
+            cloud.export_metrics.side_effect = export_error
         calls = 0
 
         def query(sql, label):
@@ -228,6 +249,16 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(calls, 6)
         self.assertEqual(result['bigquery']['gate']['status'], 'PASS')
         self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 2)
+
+    def test_optional_export_metric_failure_is_recorded_without_aborting_gate(self):
+        result, calls, cloud = self.run_measurement(export_error=RuntimeError('monitoring offline'))
+        self.assertEqual(calls, 2)
+        self.assertEqual(result['export_metrics']['status'], 'unavailable')
+        self.assertEqual(result['export_metrics']['error_type'], 'RuntimeError')
+        self.assertEqual(result['bigquery']['gate']['status'], 'PASS')
+        self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 0)
+        saved = [call.args[0] for call in cloud.save.call_args_list]
+        self.assertIn('probe-export-metrics', saved)
 
 
 class ReconcileCliTests(unittest.TestCase):

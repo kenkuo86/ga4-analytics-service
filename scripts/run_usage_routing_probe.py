@@ -175,6 +175,32 @@ class Cloud:
         return probe.sum_export_points(series)
 
 
+def _safe_save(cloud, name, data):
+    """Evidence writing must not hide the authoritative validation result."""
+    try:
+        cloud.save(name, data)
+    except Exception:  # noqa: BLE001 — the result is still reported to the caller
+        pass
+
+
+def collect_optional_export_metrics(cloud, lower, upper, expected, settled):
+    """Collect the corroborative counter without making it a gate dependency.
+
+    Exact-key Logging and BigQuery reconciliation are authoritative. Monitoring can
+    be delayed, unavailable, or malformed; all of those cases are recorded as
+    ``unavailable`` and leave the authoritative result untouched.
+    """
+    try:
+        observed = cloud.export_metrics(lower, upper)
+        details = probe.export_cross_check(observed, expected, settled)
+    except Exception as error:  # noqa: BLE001 — optional evidence is failure-isolated
+        status = {'status': 'unavailable', 'error_type': type(error).__name__,
+                  'settled': settled}
+        _safe_save(cloud, 'probe-export-metrics', status)
+        return status
+    return {'status': 'measured', 'details': details, 'settled': settled}
+
+
 def reconcile_bigquery(cloud, records, run_id, lower, upper):
     """The KPI views read BigQuery, and each sink drops independently of the others."""
     expected = probe.expected_bq_keys(records)
@@ -204,6 +230,47 @@ def delivery_exit_code(bigquery, logging_summary=None):
     if any(summary['verdict'] != 'MEASURED' for summary in summaries):
         return 2
     return 0 if bigquery['gate']['status'] == 'PASS' else 2
+
+
+def cleanup_sinks(cloud):
+    """Attempt cleanup independently and return a machine-readable final state."""
+    attempts = []
+    for attempt in range(3):
+        try:
+            cloud._refresh_owner_token()
+            states = cloud.toggle_sinks(False)
+            complete = all(states.get(name) is True for name in probe.SINKS)
+            attempts.append({'attempt': attempt + 1,
+                             'status': 'disabled' if complete else 'incomplete',
+                             'states': states})
+            if complete:
+                outcome = {'status': 'disabled', 'attempts': attempts}
+                _safe_save(cloud, 'probe-cleanup-status', outcome)
+                return outcome
+            print('WARNING: a sink did not report disabled', flush=True)
+        except Exception as error:  # noqa: BLE001 — retry with fresh credentials
+            attempts.append({'attempt': attempt + 1, 'status': 'error',
+                             'error_type': type(error).__name__})
+            print(f'Sink disable attempt {attempt + 1} failed: {type(error).__name__}', flush=True)
+            time.sleep(5)
+    outcome = {'status': 'failed', 'attempts': attempts}
+    _safe_save(cloud, 'probe-cleanup-status', outcome)
+    print('CRITICAL: could not disable sinks; disable them manually now', flush=True)
+    return outcome
+
+
+def final_exit_code(result=None, body_error=None, cleanup=None):
+    """Apply the same terminal-state priority to every execution path.
+
+    Cleanup failure is highest priority because sinks may remain enabled. A body
+    failure is next. Only a complete body result can reach the delivery gate.
+    """
+    cleanup_status = (cleanup or {'status': 'not_required'}).get('status')
+    if cleanup_status not in ('disabled', 'not_required'):
+        return 3
+    if body_error is not None or result is None:
+        return 2
+    return delivery_exit_code(result['bigquery'], result['summary'])
 
 
 def read_buckets(cloud, records, run_id, lower, upper, tag):
@@ -308,8 +375,8 @@ def measure(cloud, args, fixture, run_id, canaries=()):
     # Canaries were written just before this window and their exports land inside it,
     # so they belong in the expected counter even though they are not measured.
     settled = (time.monotonic() - last_write) >= probe.EXPORT_METRIC_LAG_SECONDS
-    result['export_metrics'] = probe.export_cross_check(
-        cloud.export_metrics(metric_lower, metric_upper),
+    result['export_metrics'] = collect_optional_export_metrics(
+        cloud, metric_lower, metric_upper,
         probe.expected_exports(list(delivered_scope) + list(canaries)), settled)
     result['export_metrics_settled'] = settled
     cloud.save('probe-delivery-result', result)
@@ -358,10 +425,13 @@ def main():
     # Canaries carry their own run id so the measurement filter can never see them.
     canary_run_id = str(uuid.uuid4())
     print(f'Probe run id {run_id}; canary run id {canary_run_id}', flush=True)
-    cloud = Cloud(args.output_dir)
+    cloud = None
     enabled_here = False
-    cleanup_failed = False
+    body_error = None
+    cleanup = {'status': 'not_required'}
+    result = None
     try:
+        cloud = Cloud(args.output_dir)
         if args.enable_sinks:
             enabled_here = True  # A partial enable also requires cleanup.
             cloud.toggle_sinks(True)
@@ -374,31 +444,27 @@ def main():
         if args.impersonate_sa:
             cloud.impersonate(args.impersonate_sa)
         result = measure(cloud, args, fixture, run_id, canaries)
+    except Exception as error:  # noqa: BLE001 — final status is decided below
+        body_error = error
+        print(f'Probe body failed: {type(error).__name__}', flush=True)
     finally:
-        if enabled_here:
-            # Leaving sinks enabled is the one outcome worse than a failed run, so this
-            # retries with fresh credentials and still shouts if it cannot confirm.
-            for attempt in range(3):
-                try:
-                    cloud._refresh_owner_token()
-                    states = cloud.toggle_sinks(False)
-                    if all(states.get(name) is True for name in probe.SINKS):
-                        break
-                    print('WARNING: a sink did not report disabled', flush=True)
-                except Exception as error:  # noqa: BLE001 — cleanup must not mask itself
-                    print(f'Sink disable attempt {attempt} failed: {error}', flush=True)
-                    time.sleep(5)
-            else:
-                cleanup_failed = True
-                print('CRITICAL: could not disable sinks; disable them manually now',
-                      flush=True)
-    if cleanup_failed:
-        return 3
+        if enabled_here and cloud is not None:
+            cleanup = cleanup_sinks(cloud)
+    status = final_exit_code(result, body_error, cleanup)
+    if status != 0:
+        final = {'status': 'cleanup_failed' if cleanup['status'] == 'failed'
+                 else 'body_failed' if body_error is not None else 'validation_failed',
+                 'exit_code': status,
+                 'body_error_type': type(body_error).__name__ if body_error else None,
+                 'cleanup': cleanup}
+        _safe_save(cloud, 'probe-final-status', final)
+        print(json.dumps(final, indent=2))
+        return status
     print(json.dumps({'logging_buckets': result['summary'],
                       'bigquery': result['bigquery']['summary'],
                       'canonical_gate': result['bigquery']['gate'],
                       'export_metrics': result['export_metrics']}, indent=2))
-    return delivery_exit_code(result['bigquery'], result['summary'])
+    return status
 
 
 if __name__ == '__main__':

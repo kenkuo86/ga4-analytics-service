@@ -144,7 +144,7 @@ def bigquery_check_sql(table, run_id, lower, upper):
             '       logName, insertId\n'
             f'FROM `{table}`\n'
             f"WHERE timestamp >= TIMESTAMP('{lower}') AND timestamp <= TIMESTAMP('{upper}')\n"
-            f"  AND JSON_VALUE(TO_JSON(labels), '$.usage_probe_run') = '{run_id}'")
+            f"  AND labels.usage_probe_run = '{run_id}'")
 
 
 def bigquery_keys(rows):
