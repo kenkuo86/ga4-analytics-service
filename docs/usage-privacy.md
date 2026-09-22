@@ -96,8 +96,8 @@ timestamp、jsonPayload 及 Logging 欄位名稱轉換，不可直接拿 payload
 
 ## 發布前與後續工作
 
-11.1–11.4 已實作；11.5 雲端資源與部分合成驗收完成，實際存取權限驗收尚未完成。
-11.6 ledger／KPI views 與 11.7 pilot 仍需實作驗證。
+11.1–11.5 已實作；11.6 已加入離線 KPI contract、activation ledger aggregator 與只讀 SQL
+plan。真實 view、dashboard reader IAM、ledger 保存政策核准與 11.7 pilot 仍需部署前驗證。
 未完成 host 實測不可宣稱 Claude／ChatGPT 行為已驗收。
 
 雲端 apply 前由 owner 授權具體資源與 IAM；目前不授 runtime SA BigQuery 寫入權。

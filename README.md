@@ -434,3 +434,11 @@ exactly-once，因此驗收是**量測並揭露到達率**，不宣稱零遺失�
 KPI 的權威來源是 BigQuery。
 
 過期重送在BQ串流暫存仍可查，owner已接受此POC保存例外；仍拒送／排除過期資料。四條路由已停用，未部署或啟用真實收集。
+
+11.6 已加入 [Usage KPI contract 與 view plan](docs/usage-kpis.md)。`usage_kpis.py` 只讀
+canonical 去重事件，分開 tool-call／analytics request／inferred session，並保留 identity、
+intent、period、resolution、latency 與資料新鮮度 coverage。`ActivationLedger` 只保存
+pseudonymous user、最早成功時間與 measurement version；沒有外部 eligible／authorized
+台帳、核准的 ledger 保存政策或連續 history 時，累積 activation／cohort／W4 retention 會
+明確降級，不將缺失填成零。`scripts/plan_usage_kpis.py` 僅產生離線 SQL，不會建立雲端 view 或
+dashboard。
