@@ -39,6 +39,9 @@ def plan(owner):
             'datasetReference':{'projectId':PROJECT,'datasetId':dataset},'location':LOCATION,
             'description':f'Phase 11 {kind}: active partition TTL {days} days; recovery copies follow platform policy',
             'defaultPartitionExpirationMs':str(days*86400000),
+            # Partitioned tables use the partition TTL; this table TTL is a fallback
+            # for an unexpected nonpartitioned raw or export_errors table.
+            'defaultTableExpirationMs':str(days*86400000),
             'maxTimeTravelHours':'48',
             # Explicit ACL; do not copy BigQuery's default projectReaders/projectWriters.
             'access':[{'role':'OWNER','userByEmail':owner.removeprefix('user:')}],

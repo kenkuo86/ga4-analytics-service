@@ -16,10 +16,11 @@
 欄位變成 repeated key/value 或其他形狀，SQL 必須先停用並更新 schema contract；不能讓
 欄位路徑失配後把所有 probe 當成正式資料或把所有資料判成遺失。
 
-`defaultPartitionExpirationMs` 是連續使用 raw table 的保存控制。計畫不再設定
-`defaultTableExpirationMs`，避免把 table lifetime 與 partition retention 混在一起。
-BigQuery Dataset API 也明確說明：設定 default partition expiration 時，partitioned table
-不繼承 default table expiration；詳見
+`defaultPartitionExpirationMs` 是連續使用 partitioned raw table 的保存控制；plan 同時
+設定相同天數的 `defaultTableExpirationMs`，作為意外 nonpartitioned raw／`export_errors`
+table 的 fallback。BigQuery Dataset API 明確說明：設定 default partition expiration 時，
+partitioned table 不繼承 default table expiration，因此兩者同時設定不會改變正常分區表的
+partition retention；詳見
 [BigQuery Dataset REST resource](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets)
 的 `defaultTableExpirationMs`／`defaultPartitionExpirationMs` 欄位說明。
 
@@ -31,7 +32,7 @@ BigQuery Dataset API 也明確說明：設定 default partition expiration 時�
 
 - `labels` 的 mode、type 與子欄位名稱。
 - raw 與 `export_errors` table 的 partition field、DAY、TTL 與 `requirePartitionFilter`。
-- table 本身沒有有限 creation-time expiration。
+- 正常 partitioned raw table 的 partition expiration；意外 nonpartitioned table 的 table expiration。
 - dedup／probe SQL 的欄位參照與當次 schema 完全一致。
 
 metadata 未完成或 schema 不一致時，routing readiness 為未量測，不得以歷史 probe 數字

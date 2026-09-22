@@ -23,8 +23,8 @@ summary 附件只揭露、不設門檻（沒有任何 KPI 計數依賴它）。�
   以 `cleanup_failed`／3 為最終結果，並保存 `probe-final-status.json`。
 - `cleanup_sinks` 獨立保存每次嘗試與最終狀態；不再依賴 `finally` 後仍能執行的旗標。
 - `docs/usage-routing-resource-evidence.md` 固定去識別化的 raw table schema／TTL 證據。
-  labels 以 nullable RECORD 欄位參照；plan 移除不必要的 `defaultTableExpirationMs`，
-  dedup／probe SQL 若 schema drift 會顯式失敗，不靜默放行 validation probe。
+  labels 以 nullable RECORD 欄位參照；plan 同時保留 partition TTL 與 nonpartitioned
+  fallback table TTL，dedup／probe SQL 若 schema drift 會顯式失敗，不靜默放行 validation probe。
 
 新增主流程成功／失敗 × cleanup 成功／失敗、Monitoring 不可用、schema shape contract
 與 cleanup evidence 的測試。routing **56** 項、完整 regression **267** 項全部通過，
@@ -64,8 +64,9 @@ BigQuery job 未完成或仍有 pageToken 的讀取不作為完整 readiness 證
 重跑尚未執行，先等待新一輪 Codex review，不將 PR 宣告可合併。
 
 原先三則 vendor/schema review 意見沒有直接當成程式錯誤，而是在本輪轉成可重複的
-repository contract：移除 `defaultTableExpirationMs`、固定 nullable RECORD 欄位參照，
-並把去識別化 metadata 放入 `docs/usage-routing-resource-evidence.md`。官方依據為
+repository contract：保留 partition TTL 與 nonpartitioned fallback table TTL、固定
+nullable RECORD 欄位參照，並把去識別化 metadata 放入 `docs/usage-routing-resource-evidence.md`。
+官方依據為
 [BigQuery Dataset API](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets)。
 暫存快照不視為永久證據，下一次 apply 前仍須重新查核 schema／TTL。
 

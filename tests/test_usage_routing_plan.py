@@ -28,9 +28,9 @@ class RoutingPlanTests(unittest.TestCase):
 
     def test_summary_is_separate_short_lived_storage_including_default_exclusion(self):
         plan=routing.plan('user:owner@example.test')
-        for dataset in plan['datasets']:
-            self.assertNotIn('defaultTableExpirationMs', dataset)
         self.assertEqual([d['defaultPartitionExpirationMs'] for d in plan['datasets']],
+                         [str(180*86400000),str(30*86400000)])
+        self.assertEqual([d['defaultTableExpirationMs'] for d in plan['datasets']],
                          [str(180*86400000),str(30*86400000)])
         self.assertEqual([b['retentionDays'] for b in plan['logging_buckets']],[180,30])
         for sink in plan['sinks']:
