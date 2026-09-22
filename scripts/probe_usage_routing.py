@@ -251,6 +251,23 @@ def sum_export_points(series, sink_names=SINKS):
 EXPORT_METRIC_LAG_SECONDS = 900
 
 
+def export_metric_window(measurement_lower, canaries=(), margin_minutes=2, now=None):
+    """Window covering every write whose export is counted as expected.
+
+    Readiness may retry for several minutes, so the window has to reach back past the
+    canaries. Counting a canary as expected while its export sits outside the window
+    would manufacture a shortfall — the mirror image of omitting it entirely.
+    """
+    stamps = [measurement_lower] + [record['event_time'] for record in canaries]
+    for stamp in stamps:
+        if not RFC3339_PATTERN.fullmatch(stamp):
+            raise ValueError('timestamps must be RFC3339')
+    earliest = datetime.fromisoformat(min(stamps).replace('Z', '+00:00'))
+    end = now or datetime.now(timezone.utc)
+    return ((earliest - timedelta(minutes=margin_minutes)).isoformat().replace('+00:00', 'Z'),
+            (end + timedelta(minutes=1)).isoformat().replace('+00:00', 'Z'))
+
+
 def export_cross_check(observed, expected, settled=True):
     """Compare sink counters with the expected export volume, per sink.
 

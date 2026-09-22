@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -219,7 +219,8 @@ def await_routing_ready(cloud, args, fixture, canary_run_id):
         canary = probe.build_records(fixture, 1)
         lower = min(record['event_time'] for record in canary)
         acks = [cloud.write_probe(record, canary_run_id) for record in canary]
-        written.extend(probe.records_from_acks(acks))
+        # Keep the full records: their event_time sets the export-metric window below.
+        written.extend(record for record, ack in zip(canary, acks) if ack['ok'])
         if not all(ack['ok'] for ack in acks):
             # A rejected canary says nothing about routing; do not read it as not-ready.
             raise RuntimeError(f'canary write rejected: {[ack["status"] for ack in acks]}')
@@ -247,7 +248,7 @@ def measure(cloud, args, fixture, run_id, canaries=()):
     acks = []
     for index, record in enumerate(records):
         acks.append(cloud.write_probe(record, run_id))
-        cloud.save('probe-write-acks', acks)
+        cloud.save('probe-write-acks', acks)  # rewritten each time so a crash keeps evidence
         if index + 1 < len(records):
             time.sleep(args.spacing_seconds)
     last_write = time.monotonic()
@@ -279,9 +280,7 @@ def measure(cloud, args, fixture, run_id, canaries=()):
               f" verdict={result['summary']['verdict']}", flush=True)
         if result['summary']['delivered'] == result['summary']['expected'] and complete:
             break
-    metric_lower = (datetime.fromisoformat(lower.replace('Z', '+00:00'))
-                    - timedelta(minutes=2)).isoformat().replace('+00:00', 'Z')
-    metric_upper = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat().replace('+00:00', 'Z')
+    metric_lower, metric_upper = probe.export_metric_window(lower, canaries)
     # Canaries were written just before this window and their exports land inside it,
     # so they belong in the expected counter even though they are not measured.
     settled = (time.monotonic() - last_write) >= probe.EXPORT_METRIC_LAG_SECONDS

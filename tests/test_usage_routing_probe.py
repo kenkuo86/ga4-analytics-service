@@ -382,3 +382,26 @@ class ExportSettlingTests(unittest.TestCase):
                                  ({'ga4-mcp-test-events-bq-v1': 302}, 'excess')):
             self.assertEqual(probe.export_cross_check(observed, expected, settled=False)
                              ['ga4-mcp-test-events-bq-v1']['status'], wanted)
+
+
+class ExportWindowTests(unittest.TestCase):
+    """Every write counted as expected must lie inside the metric window."""
+
+    def test_window_reaches_back_past_a_retried_readiness_phase(self):
+        canaries = [{'event_time': '2026-09-22T05:00:00Z'},
+                    {'event_time': '2026-09-22T05:04:00Z'}]
+        lower, upper = probe.export_metric_window(
+            '2026-09-22T05:10:00Z', canaries,
+            now=__import__('datetime').datetime(2026, 9, 22, 5, 30,
+                                                tzinfo=__import__('datetime').timezone.utc))
+        self.assertEqual(lower, '2026-09-22T04:58:00Z')
+        self.assertEqual(upper, '2026-09-22T05:31:00Z')
+        # Without canaries the window starts from the measurement instead.
+        bare, _ = probe.export_metric_window('2026-09-22T05:10:00Z')
+        self.assertEqual(bare, '2026-09-22T05:08:00Z')
+
+    def test_window_rejects_non_rfc3339_input(self):
+        with self.assertRaises(ValueError):
+            probe.export_metric_window('yesterday')
+        with self.assertRaises(ValueError):
+            probe.export_metric_window('2026-09-22T05:10:00Z', [{'event_time': 'soon'}])
