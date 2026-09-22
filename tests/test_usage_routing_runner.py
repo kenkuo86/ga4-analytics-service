@@ -163,5 +163,113 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(cloud._refresh_owner_token.call_count, 2)
 
 
+class MeasurementTests(unittest.TestCase):
+    def run_measurement(self, delayed_event=None, arrive_on=2, incomplete=False,
+                        logging_complete=True):
+        cloud = Mock()
+        records = probe.build_records(FIXTURE, 100)
+        expected = probe.expected_bq_keys(records)
+        cloud.write_probe.side_effect = lambda r, run: dict(r, ok=True)
+        cloud.export_metrics.return_value = {}
+        calls = 0
+
+        def query(sql, label):
+            nonlocal calls
+            poll = calls // 2 + 1
+            calls += 1
+            table = next(t for t, _, _ in probe.BQ_TABLES if t.endswith('.' + label))
+            event = probe.SUMMARY_EVENT if 'summary' in label else probe.CANONICAL_EVENT
+            keys = list(expected[table])
+            if event == delayed_event and poll < arrive_on:
+                keys = []
+            return keys, {'jobComplete': not incomplete}
+
+        cloud.query_bigquery.side_effect = query
+        buckets, _ = ReadinessTests.buckets(cloud, records)
+        args = SimpleNamespace(probes=100, spacing_seconds=0, polls=3, poll_seconds=0)
+        with patch.object(probe, 'build_records', return_value=records), \
+                patch.object(runner, 'read_buckets', return_value=(buckets, logging_complete)), \
+                patch.object(runner.time, 'sleep'), patch('builtins.print'):
+            result = runner.measure(cloud, args, FIXTURE, RUN_ID)
+        return result, calls, cloud
+
+    def test_polls_each_bigquery_destination_after_logging_is_complete(self):
+        for event in (probe.CANONICAL_EVENT, probe.SUMMARY_EVENT):
+            with self.subTest(event=event):
+                result, calls, cloud = self.run_measurement(delayed_event=event)
+                self.assertEqual(calls, 4)
+                self.assertEqual(result['poll'], 1)
+                self.assertEqual(result['bigquery']['summary']['delivered'], 200)
+                self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 0)
+                saved = [call.args[0] for call in cloud.save.call_args_list]
+                self.assertIn('probe-delivery-poll-0', saved)
+                self.assertIn('probe-delivery-poll-1', saved)
+
+    def test_missing_canonical_stops_at_poll_limit_and_fails_gate(self):
+        result, calls, _ = self.run_measurement(probe.CANONICAL_EVENT, arrive_on=99)
+        self.assertEqual(calls, 6)
+        self.assertEqual(result['poll'], 2)
+        self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 2)
+
+    def test_summary_delay_uses_full_budget_but_does_not_change_canonical_gate(self):
+        result, calls, _ = self.run_measurement(probe.SUMMARY_EVENT, arrive_on=99)
+        self.assertEqual(calls, 6)
+        self.assertEqual(result['bigquery']['summary']['lost'], 100)
+        self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 0)
+
+    def test_incomplete_bigquery_never_passes_even_if_expected_keys_are_present(self):
+        result, calls, _ = self.run_measurement(incomplete=True)
+        self.assertEqual(calls, 6)
+        self.assertEqual(result['bigquery']['gate']['status'], 'NOT_MEASURED')
+        self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 2)
+
+    def test_incomplete_logging_cannot_pass_with_a_passing_bigquery_gate(self):
+        result, calls, _ = self.run_measurement(logging_complete=False)
+        self.assertEqual(calls, 6)
+        self.assertEqual(result['bigquery']['gate']['status'], 'PASS')
+        self.assertEqual(runner.delivery_exit_code(result['bigquery'], result['summary']), 2)
+
+
+class ReconcileCliTests(unittest.TestCase):
+    def test_reconcile_mode_returns_actual_validation_status_without_writes(self):
+        records = probe.build_records(FIXTURE, 100)
+        expected = probe.expected_bq_keys(records)
+        cases = [('pass', 0), ('missing', 2), ('incomplete', 2),
+                 ('paginated', 2), ('unexpected', 1), ('empty', 2)]
+        for scenario, status in cases:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                cloud = Mock()
+
+                def query(sql, label):
+                    table = next(t for t, _, _ in probe.BQ_TABLES if t.endswith('.' + label))
+                    keys = list(expected[table]) if scenario != 'missing' else []
+                    if scenario == 'unexpected':
+                        keys.append(('unexpected', 'event', 'log', 'insert'))
+                    raw = {'jobComplete': scenario != 'incomplete'}
+                    if scenario == 'paginated':
+                        raw['pageToken'] = 'next'
+                    return keys if scenario != 'empty' else [], raw
+
+                cloud.query_bigquery.side_effect = query
+                ack_file = Path(directory) / 'acks.json'
+                ack_file.write_text(json.dumps([] if scenario == 'empty' else
+                                               [dict(r, ok=True) for r in records]))
+                argv = ['probe', '--apply', '--output-dir', directory,
+                        '--reconcile-acks', str(ack_file), '--run-id', RUN_ID,
+                        '--window-lower', '2026-09-22T00:00:00Z',
+                        '--window-upper', '2026-09-22T01:00:00Z']
+                with patch.object(runner.sys, 'argv', argv), \
+                        patch.object(runner, 'Cloud', return_value=cloud), patch('builtins.print'):
+                    self.assertEqual(runner.main(), status)
+                cloud.write_probe.assert_not_called()
+                cloud.toggle_sinks.assert_not_called()
+                cloud.impersonate.assert_not_called()
+
+    def test_isolation_failure_takes_priority_over_incomplete_evidence(self):
+        outcome = {'summary': {'verdict': 'INCOMPLETE', 'isolation_holds': False},
+                   'gate': {'status': 'NOT_MEASURED'}}
+        self.assertEqual(runner.delivery_exit_code(outcome), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

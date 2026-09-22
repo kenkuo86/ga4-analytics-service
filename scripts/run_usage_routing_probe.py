@@ -187,8 +187,23 @@ def reconcile_bigquery(cloud, records, run_id, lower, upper):
         if not raw.get('jobComplete', False) or raw.get('pageToken'):
             per_table[table]['job_complete'] = False
     complete = all(result.get('job_complete', True) for result in per_table.values())
+    gate = (probe.gate_check(per_table) if complete else
+            {'gate': probe.CANONICAL_DELIVERY_GATE, 'status': 'NOT_MEASURED'})
     return {'per_table': per_table, 'summary': probe.summarize(per_table, complete),
-            'gate': probe.gate_check(per_table)}
+            'gate': gate}
+
+
+def delivery_exit_code(bigquery, logging_summary=None):
+    """Both CLI paths require complete, isolated evidence before accepting the gate."""
+    summaries = [bigquery['summary']]
+    if logging_summary is not None:
+        summaries.append(logging_summary)
+    if any(summary['verdict'] == 'ISOLATION_FAILED'
+           or summary.get('isolation_holds') is False for summary in summaries):
+        return 1
+    if any(summary['verdict'] != 'MEASURED' for summary in summaries):
+        return 2
+    return 0 if bigquery['gate']['status'] == 'PASS' else 2
 
 
 def read_buckets(cloud, records, run_id, lower, upper, tag):
@@ -274,15 +289,20 @@ def measure(cloud, args, fixture, run_id, canaries=()):
         time.sleep(args.poll_seconds)
         upper = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         reconciliations, complete = read_buckets(cloud, delivered_scope, run_id, lower, upper, poll)
+        bigquery = reconcile_bigquery(cloud, delivered_scope, run_id, lower, upper)
         result = {'poll': poll, 'window': {'lower': lower, 'upper': upper},
                   'accepted_writes': accepted, 'attempted_writes': len(acks),
                   'per_destination': reconciliations,
-                  'summary': probe.summarize(reconciliations, complete)}
+                  'summary': probe.summarize(reconciliations, complete),
+                  'bigquery': bigquery}
+        cloud.save(f'probe-delivery-poll-{poll}', result)
         cloud.save('probe-delivery-result', result)
         print(f"poll {poll}: delivered {result['summary']['delivered']}"
               f"/{result['summary']['expected']}"
               f" verdict={result['summary']['verdict']}", flush=True)
-        if result['summary']['delivered'] == result['summary']['expected'] and complete:
+        if (complete and probe.readiness_reached(reconciliations)
+                and bigquery['summary']['searches_complete']
+                and probe.readiness_reached(bigquery['per_table'])):
             break
     metric_lower, metric_upper = probe.export_metric_window(lower, canaries)
     # Canaries were written just before this window and their exports land inside it,
@@ -292,8 +312,6 @@ def measure(cloud, args, fixture, run_id, canaries=()):
         cloud.export_metrics(metric_lower, metric_upper),
         probe.expected_exports(list(delivered_scope) + list(canaries)), settled)
     result['export_metrics_settled'] = settled
-    result['bigquery'] = reconcile_bigquery(cloud, delivered_scope, run_id, lower,
-                                            result['window']['upper'])
     cloud.save('probe-delivery-result', result)
     return result
 
@@ -330,8 +348,9 @@ def main():
         outcome = reconcile_bigquery(cloud, records, args.run_id,
                                      args.window_lower, args.window_upper)
         cloud.save('probe-bigquery-reconciliation', outcome)
-        print(json.dumps(outcome['summary'], indent=2))
-        return 0
+        print(json.dumps({'bigquery': outcome['summary'],
+                          'canonical_gate': outcome['gate']}, indent=2))
+        return delivery_exit_code(outcome)
 
     fixture = json.loads(args.fixture.read_text())
     probe.plan_document(args.probes)  # reject an out-of-range sample before touching the cloud
@@ -379,10 +398,7 @@ def main():
                       'bigquery': result['bigquery']['summary'],
                       'canonical_gate': result['bigquery']['gate'],
                       'export_metrics': result['export_metrics']}, indent=2))
-    failed = {result['summary']['verdict'], result['bigquery']['summary']['verdict']}
-    if 'ISOLATION_FAILED' in failed:
-        return 1
-    return 0 if result['bigquery']['gate']['status'] == 'PASS' else 2
+    return delivery_exit_code(result['bigquery'], result['summary'])
 
 
 if __name__ == '__main__':

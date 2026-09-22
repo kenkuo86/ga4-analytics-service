@@ -9,7 +9,26 @@ rollout 門檻為 **canonical 事件送達 BigQuery ≥ 95%，以 Wilson 95% 信
 summary 附件只揭露、不設門檻（沒有任何 KPI 計數依賴它）。判定由
 `scripts/probe_usage_routing.py` 的 `gate_check` 產出，不靠人工敘述。
 
-## 2026-09-22 review 修正狀態（最新）
+## 2026-09-22 第二輪 review 修正（最新）
+
+針對 `eb7b6a4` 的兩項新 P1：
+
+- 正式樣本每次輪詢同時逐鍵核對 Logging buckets 與兩張 BQ 原始表，只有四個目的地
+  都完整到達且隔離成立才提前結束；BQ 延遲時使用剩餘 `--polls` 次數繼續等待。
+  到輪詢上限仍缺失，才以最後一輪觀測結果判定門檻；不宣稱缺失是永久遺失。
+  每輪另存 `probe-delivery-poll-N.json`，保留 BQ 延遲演進與查核完整性。
+- 正常量測與 `--reconcile-acks` 共用退出碼判定：隔離失敗為 1，查核不完整、未量測或
+  canonical 未達 Wilson 門檻為 2；只有完整、隔離成立且 canonical 通過才為 0。
+  未完成 job 或有 pageToken 的 BQ 結果不計 gate，標示 NOT_MEASURED；清理失敗仍為 3。
+  Summary 缺漏仍只揭露，不另設門檻；因此等待輪詢上限後，完整觀測的 summary 缺漏
+  不會單獨令 canonical 門檻失敗。`--reconcile-acks` 僅重新讀取 BQ，不驗證 Logging 隔離。
+
+新增 7 項離線測試，涵蓋兩類 BQ 延遲、輪詢上限、summary 缺失的既有政策、BQ／Logging
+查核不完整，以及 reconcile CLI 的成功／缺失／未完成／分頁／隔離失敗／空樣本退出碼。
+沿用下列本機指令驗收：routing 53 項、完整 regression 264 項全部通過，compileall 與
+diff check 通過。雲端重跑未執行，不修改 IAM、sinks 或部署，等待新一輪 Codex review。
+
+## 2026-09-22 第一輪 review 修正紀錄
 
 本輪修正三項 P1：readiness 必須同時確認兩個專用 Logging buckets、兩張 BigQuery
 原始表逐鍵到達，且 `_Default` 無副本；啟用 sinks 前即建立清理責任，部分 PATCH
@@ -305,7 +324,7 @@ ack、逐頁原始回覆、BigQuery dry-run 與結果、匯出指標、sink 開�
 .venv/bin/python scripts/run_usage_routing_probe.py --apply --output-dir DIR   --reconcile-acks DIR/probe-write-acks.json --run-id <run>   --window-lower <RFC3339> --window-upper <RFC3339>
 ```
 
-結束碼：0 通過門檻，1 隔離失敗，2 量測完成但未達門檻，3 無法確認 sinks 全部停用。
+結束碼：0 通過門檻，1 隔離失敗，2 查核不完整／未量測／未達門檻，3 無法確認 sinks 全部停用。
 其他執行例外以非零碼結束；即使量測通過，清理失敗也不得回傳 0。
 
 先前輪次的本機操作／原始 API 設定快照位於 `/private/tmp/ga4-mcp-test-cloud-audit/`，不含
