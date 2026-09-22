@@ -1,7 +1,13 @@
 # Phase 11.5 合成驗收紀錄（2026-09-21–22）
 
-資源已依 owner 授權建立於 `ga4-reports-dev`／`asia-east1`。**尚未完成 11.5 acceptance，
-四條 sinks 已停用、未部署、未啟用真實資料收集。** PR 維持 Draft，不應標為可合併。
+資源已依 owner 授權建立於 `ga4-reports-dev`／`asia-east1`。**四條 sinks 已停用、未部署、
+未啟用真實資料收集。**
+
+驗收標準依 ROADMAP「Reliability, rollout and validation」第 1、4 點訂定：Cloud Logging
+不承諾 exactly-once，因此本階段**量測並揭露到達率**，而非宣稱零遺失。Owner 核定的
+rollout 門檻為 **canonical 事件送達 BigQuery ≥ 95%，以 Wilson 95% 信賴下界判定**；
+summary 附件只揭露、不設門檻（沒有任何 KPI 計數依賴它）。判定由
+`scripts/probe_usage_routing.py` 的 `gate_check` 產出，不靠人工敘述。
 
 ## 已完成
 
@@ -142,10 +148,130 @@ owner 核准新一輪同範圍的一小時 conditional binding／最長五分鐘
 先通過 owner readiness 才授權，未通過則停止；不改 BQ／Secret 資料角色，不部署或啟用
 真實收集。新一輪授權尚未取得、尚未執行。
 
+## 2026-09-22 交付探針與到達率量測
+
+驗收改由 repository 內的工具執行，取代先前 `/private/tmp` 的一次性腳本（那些腳本已於
+本文件標示不可原樣重跑）：
+
+- `scripts/probe_usage_routing.py`：純邏輯，永不連網。寫入契約、filter 建構、完整分頁
+  狀態機、逐鍵 multiset 比對、Wilson 區間、readiness 判定、匯出交叉比對與 `gate_check`。
+- `scripts/run_usage_routing_probe.py`：只搬移位元組與保存證據。不讀寫 IAM、不部署、
+  不啟用真實收集、不輸出憑證；啟用的 sinks 一律在 `finally` 以新憑證重試停用。
+- `tests/test_usage_routing_probe.py`：其中一項測試直接比對 `usage_logging.LoggingWriter`
+  實際送出的 body 與探針 body，除兩個合成標籤外必須完全相同，防止驗收形狀與 production 漂移。
+
+探針為 production 形狀：**一次 `entries:write` 只送一筆**，與 runtime writer 相同。
+兩個刻意差異都是合成標記：`usage_validation=true` 讓去重 views 排除驗收資料；
+`usage_probe_run=<uuid>` 讓單一 run 以一個 filter 條件選出。canary 使用**獨立的 run id**，
+因此量測 filter 不可能看到 canary。
+
+### 路由生效不是等固定秒數
+
+先前所有輪次都在 sink 啟用後等固定秒數就開始寫入。實測證明這是錯的閘門：
+
+| 輪次 | 等待設定 | canary 結果 |
+| --- | --- | --- |
+| 2026-09-22 第一次 readiness 版 | 240 秒 | **第 0 次 canary 在再等約 120 秒後仍未送達**；第 1 次才確認生效 |
+| 2026-09-22 第二次 readiness 版 | 240 秒 | 第 0 次即確認生效 |
+
+也就是 sink 啟用後真正生效的時間**是變動的，且可超過 300 秒**。在傳播窗口內寫入的
+entry 會被靜默丟棄，因此任何跨越該窗口取得的遺失率都受污染，不得作為穩態數據。
+本文件先前「等 180 秒後即可發送」的作法已作廢；`await_routing_ready` 改為寫入 canary
+並確認四個目的地逐鍵到達後才開始量測，未確認則拒絕量測（不產出數字）。
+
+### 遺失機制：兩種都存在
+
+`exports/error_count` 在所有輪次**全程為空**，平台不回報任何匯出錯誤。實測到兩種丟棄：
+
+1. **單一 sink 獨立丟棄（export 端）**：owner 輪有一筆 summary 進入 BigQuery，卻不在
+   Logging bucket。兩條 summary sink 的 filter 完全相同，匯出計數器仍分別是 49 與 48。
+2. **所有 sink 一起丟棄（ingestion 端）**：readiness 版有 3 筆在四個目的地皆不存在，
+   bucket 與 BigQuery 缺的是同一組鍵。
+
+直接後果：**Logging bucket 的副本不能用來稽核 BigQuery 的副本，反之亦然**。KPI views 讀
+BigQuery，因此權威來源明定為 BigQuery，驗收必須對 BigQuery 逐鍵比對；探針早期只比對
+bucket，屬量錯目的地，已修正。
+
+### 量測結果
+
+量測用三種互相獨立的方法互相佐證：Logging bucket 逐鍵、BigQuery 逐鍵、
+`exports/log_entry_count` 計數器。前兩者是權威來源；計數器只作佐證。
+
+**計數器有顯著且緩慢收斂的 ingestion 延遲**：n=300 那輪在寫入結束後約 1 分鐘查得 169，
+其後重查依序為 198、224，仍未達實際的 301，而同一批資料的逐鍵比對早已確認 600/600 到達。
+放寬查詢窗口不改變結果，確認是延遲而非窗口設定。因此計數器低於預期時，只有在窗口已沉澱
+（預設 900 秒）後才算短少，否則回報 `inconclusive`；`match` 與 `excess` 則隨時有意義。
+先前幾輪計數器能完全吻合，是因為那些輪次在查指標前已跑了 8–13 分鐘。
+**計數器永遠不得推翻逐鍵比對的結論。**
+
+| 輪次 | 條件 | 寫入接受 | canonical → BQ | summary → BQ | `_Default` |
+| --- | --- | --- | --- | --- | --- |
+| Owner | 固定 180 秒，1.0s 間隔，n=50 | 100/100 | 50/50 | 49/50 | 0，隔離成立 |
+| Runtime SA | 固定 180 秒，0.5s 間隔，n=50 | 100/100 | 39/50 | 42/50 | 0，隔離成立 |
+| Readiness 閘門 | canary 確認生效，1.0s 間隔，n=75 | 150/150 | 74/75 | 73/75 | 0，隔離成立 |
+| **Readiness 閘門（定案）** | canary 確認生效，1.0s 間隔，**n=300** | 600/600 | **300/300** | **300/300** | 0，隔離成立 |
+
+### Rollout 門檻判定
+
+以 n=300 這輪為準（`gate_check` 產出，非人工敘述）：
+
+| 項目 | 值 |
+| --- | --- |
+| 來源 | `ga4-reports-dev.ga4_mcp_test_events.ga4_mcp_test_v1` |
+| canonical 應到／實到 | 300 / 300 |
+| 送達率 | 1.000 |
+| 送達率 95% 信賴下界 | **0.9874** |
+| 門檻 | 0.95 |
+| 判定 | **PASS** |
+
+兩輪 readiness 閘門合計 canonical 374/375（99.73%），信賴下界仍高於門檻。零遺失**不**代表
+平台保證不遺失——n=75 那輪就掉了 3 筆——只代表在路由確認生效後，遺失率低到本樣本量測不到。
+依 ROADMAP 規定仍不得宣稱 exactly-once。
+
+前兩輪跨越傳播窗口，**不得作為穩態遺失率**：兩輪同時差了寫入者身分、寫入間隔與各自一次
+sink 冷啟動，屬混淆實驗，無法歸因；兩輪的遺失也都集中在最前面的寫入。列出僅為完整揭露。
+
+Runtime SA 的結果另有一項獨立價值：**runtime service account 確實可用 `logging.logWriter`
+寫入兩個正式 log 並完成路由**（100 筆全部 HTTP 200，39／42 筆確認到達），這是 11.2 身分
+前置在真實雲端的正向驗證。其偏低的到達率歸因於冷啟動與混淆，不作為 SA 身分的缺陷結論。
+
+### 驗收期間在探針本身發現並修正的缺陷
+
+這些缺陷都出在驗收工具、不在服務程式，但其中兩項若未發現會直接產出錯誤結論，因此列入紀錄：
+
+| 缺陷 | 後果 | 修正 |
+| --- | --- | --- |
+| 以「嘗試寫入」為分母 | token 過期導致 33 筆 401 後，仍把未送出的 entry 算成應到未到，會產出看似合理的約 40% 假遺失率 | 分母改為已被接受的寫入；有拒絕時明確警告並排除 |
+| owner token 不更新 | readiness 閘門拉長執行時間後，中途起全部寫入變 401 | 定時刷新並於 401 重試；impersonated token 刻意不刷新，短效期即是目的 |
+| 清理路徑共用同一過期 token | `finally` 停用 sinks 失敗，**四條 sink 被留在啟用狀態** | 清理前強制換發憑證、重試三次、仍失敗則輸出 CRITICAL |
+| 匯出指標缺值視為 0 | Monitoring 有數分鐘 ingestion 延遲，缺值被報成「零匯出」，與先前分頁未讀完報成 0 屬同一類錯誤 | 缺值回報 `unavailable`，永不等同 0 |
+| canary 未計入匯出預期值 | canary 的匯出落在指標窗口內，造成匯出交叉比對假性短少 | 預期值納入 canary；canary 另用獨立 run id，量測 filter 看不到它 |
+| 以逐一列舉 interaction id 建 filter | 約數百筆樣本即逼近 Logging filter 長度上限，會在樣本大到有意義時才失效 | 改以單一 `usage_probe_run` 標籤選取，filter 長度與樣本無關並有測試把關 |
+
+前三項於實際執行中發生並已實測修復，其餘由測試覆蓋。`finally` 失效那次的四條 sink 已於
+發現當下以新憑證手動停用並確認 `disabled=true`。
+
 ## 實際指令與證據
 
-本機操作／原始 API 設定快照位於 `/private/tmp/ga4-mcp-test-cloud-audit/`，不含 access token
-或 secret 值。合成 fixture SQL 位於 `/private/tmp/ga4-mcp-test-routing-plan/`；不可把暫存
+2026-09-22 到達率量測的證據位於 `/private/tmp/ga4-mcp-test-probe-*-20260922/`（每輪的寫入
+ack、逐頁原始回覆、BigQuery dry-run 與結果、匯出指標、sink 開關狀態、readiness 紀錄），
+不含 access token 或 secret 值。重跑指令：
+
+```bash
+# 離線：只產生 manifest，不認證、不變更
+.venv/bin/python scripts/probe_usage_routing.py --output-dir DIR --probes 300
+
+# 雲端：需 --apply；結束一律停用 sinks
+.venv/bin/python scripts/run_usage_routing_probe.py --output-dir DIR   --fixture DIR/fixture.json --probes 300 --apply --enable-sinks   --spacing-seconds 1.0 --settle-seconds 240 --poll-seconds 60 --polls 4
+
+# 只對既有 ack 重新比對 BigQuery，不寫入任何新資料
+.venv/bin/python scripts/run_usage_routing_probe.py --apply --output-dir DIR   --reconcile-acks DIR/probe-write-acks.json --run-id <run>   --window-lower <RFC3339> --window-upper <RFC3339>
+```
+
+結束碼：0 通過門檻，1 隔離失敗，2 量測完成但未達門檻。
+
+先前輪次的本機操作／原始 API 設定快照位於 `/private/tmp/ga4-mcp-test-cloud-audit/`，不含
+access token 或 secret 值。合成 fixture SQL 位於 `/private/tmp/ga4-mcp-test-routing-plan/`；不可把暫存
 目錄當永久備份。本文件記錄關鍵結果，後續重跑應重新產生並審閱 fixture。
 
 ```bash

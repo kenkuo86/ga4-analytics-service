@@ -97,6 +97,7 @@ usage來源全停且不會重送，才移除本次新增exclusion，其他exclus
 - [BigQuery time travel與fail-safe](https://docs.cloud.google.com/bigquery/docs/time-travel)
 - [Dataset API](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets)
 
-已對兩份SELECT函數本體，以inline合成JSON取代尚不存在的raw tables進行BigQuery dry-run，
-皆驗證通過、預估0 bytes。這不驗證真實Logging envelope schema、CREATE TABLE FUNCTION、
-實際去重結果或任何cloud acceptance；上述項目仍待授權建立資源後驗收。
+規劃階段曾以 inline 合成 JSON 代替 raw tables，對兩份 SELECT 函數本體進行
+BigQuery dry-run，皆通過且預估 0 bytes；該檢查本身不代表雲端驗收。
+其後已依 owner 授權建立資源並驗證實際 envelope、函數及去重；最新權限、
+到達檢查與未通過項目見 [合成驗收紀錄](usage-routing-validation.md)。
