@@ -184,7 +184,7 @@ def reconcile_bigquery(cloud, records, run_id, lower, upper):
         observed, raw = cloud.query_bigquery(sql, table.rsplit('.', 1)[-1])
         per_table[table] = probe.reconcile(expected[table], observed)
         per_table[table]['bytes_billed'] = raw.get('totalBytesBilled')
-        if not raw.get('jobComplete', True):
+        if not raw.get('jobComplete', False) or raw.get('pageToken'):
             per_table[table]['job_complete'] = False
     complete = all(result.get('job_complete', True) for result in per_table.values())
     return {'per_table': per_table, 'summary': probe.summarize(per_table, complete),
@@ -229,7 +229,11 @@ def await_routing_ready(cloud, args, fixture, canary_run_id):
             upper = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             reconciliations, complete = read_buckets(cloud, canary, canary_run_id,
                                                      lower, upper, f'canary{attempt}')
-            if complete and probe.readiness_reached(reconciliations):
+            bigquery = reconcile_bigquery(cloud, canary, canary_run_id, lower, upper)
+            cloud.save(f'probe-readiness-bq-{attempt}-{_}', bigquery)
+            if (complete and probe.readiness_reached(reconciliations)
+                    and bigquery['summary']['searches_complete']
+                    and probe.readiness_reached(bigquery['per_table'])):
                 attempts.append({'attempt': attempt, 'ready': True, 'acks': acks})
                 cloud.save('probe-readiness', attempts)
                 print(f'Routing confirmed live on canary attempt {attempt}', flush=True)
@@ -337,10 +341,11 @@ def main():
     print(f'Probe run id {run_id}; canary run id {canary_run_id}', flush=True)
     cloud = Cloud(args.output_dir)
     enabled_here = False
+    cleanup_failed = False
     try:
         if args.enable_sinks:
+            enabled_here = True  # A partial enable also requires cleanup.
             cloud.toggle_sinks(True)
-            enabled_here = True
             print(f'Waiting {args.settle_seconds}s for sink configuration to settle', flush=True)
             time.sleep(args.settle_seconds)
         cloud.confirm_sinks_enabled()
@@ -358,15 +363,18 @@ def main():
                 try:
                     cloud._refresh_owner_token()
                     states = cloud.toggle_sinks(False)
-                    if all(states.values()):
+                    if all(states.get(name) is True for name in probe.SINKS):
                         break
                     print('WARNING: a sink did not report disabled', flush=True)
                 except Exception as error:  # noqa: BLE001 — cleanup must not mask itself
                     print(f'Sink disable attempt {attempt} failed: {error}', flush=True)
                     time.sleep(5)
             else:
+                cleanup_failed = True
                 print('CRITICAL: could not disable sinks; disable them manually now',
                       flush=True)
+    if cleanup_failed:
+        return 3
     print(json.dumps({'logging_buckets': result['summary'],
                       'bigquery': result['bigquery']['summary'],
                       'canonical_gate': result['bigquery']['gate'],

@@ -9,7 +9,44 @@ rollout 門檻為 **canonical 事件送達 BigQuery ≥ 95%，以 Wilson 95% 信
 summary 附件只揭露、不設門檻（沒有任何 KPI 計數依賴它）。判定由
 `scripts/probe_usage_routing.py` 的 `gate_check` 產出，不靠人工敘述。
 
-## 已完成
+## 2026-09-22 review 修正狀態（最新）
+
+本輪修正三項 P1：readiness 必須同時確認兩個專用 Logging buckets、兩張 BigQuery
+原始表逐鍵到達，且 `_Default` 無副本；啟用 sinks 前即建立清理責任，部分 PATCH
+失敗也會清理；三次停用後仍無法確認四條 sinks 全部 disabled 時回傳 exit code 3。
+BigQuery job 未完成或仍有 pageToken 的讀取不作為完整 readiness 證據。
+
+新增 `tests/test_usage_routing_runner.py`，以離線故障注入覆蓋上述分支、BQ 延遲／缺失、
+不完整結果、隔離失敗、停用重試恢復與缺失狀態。沒有認證、雲端寫入、IAM 修改或部署。
+
+**以下 300/300 與 PASS 是修正前歷史量測，不是本輪新版 readiness 的雲端驗收。**
+舊 readiness 只確認 Logging buckets，不能據此宣稱已先確認四個目的地；新版雲端
+重跑尚未執行，先等待新一輪 Codex review，不將 PR 宣告可合併。
+
+另三則自動 review 意見經核對未採納：
+
+- Dataset API 明訂同時設定 `defaultPartitionExpirationMs` 時，新分區表不繼承
+  `defaultTableExpirationMs`。既有四張表的 metadata 快照也不是 30／180 天整表到期。
+- 兩張 raw table 的實際 schema 快照中 `labels` 為 NULLABLE RECORD，欄位包含
+  `usage_validation`，不是 repeated key/value；故目前 JSON object 路徑無須改成 UNNEST。
+  實際 probe BQ 查詢已有 300/300 結果，dedup 合成排除亦有先前驗收紀錄。
+- 依據：[BigQuery Dataset API](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets)；
+  本機快照為 `/private/tmp/ga4-mcp-test-cloud-audit/` 下兩份 raw `*-schema.json`
+  與四份 `*-partition-verified.json`。暫存快照不視為永久證據，未來重跑仍須重新查核 schema。
+
+本輪本機驗收指令（於 routing worktree 執行；共用主 workspace 的 virtualenv）：
+
+```bash
+/Users/guoqian/Desktop/ga4-analytics-service/.venv/bin/python -m unittest discover -s tests -p 'test_usage_routing*.py' -v
+/Users/guoqian/Desktop/ga4-analytics-service/.venv/bin/python -m unittest discover -s tests -v
+/Users/guoqian/Desktop/ga4-analytics-service/.venv/bin/python -m compileall -q scripts/ tests/
+git diff --check
+```
+
+本輪結果：routing 46 項、完整 regression 257 項全部通過；compileall 與 diff check 通過。
+Repository 未提供獨立 lint／type check／build 設定。新版雲端驗收未執行；獨立複審待 Codex review。
+
+## 已完成（歷史雲端驗收）
 
 | 項目 | 實測結果 |
 | --- | --- |
@@ -268,7 +305,8 @@ ack、逐頁原始回覆、BigQuery dry-run 與結果、匯出指標、sink 開�
 .venv/bin/python scripts/run_usage_routing_probe.py --apply --output-dir DIR   --reconcile-acks DIR/probe-write-acks.json --run-id <run>   --window-lower <RFC3339> --window-upper <RFC3339>
 ```
 
-結束碼：0 通過門檻，1 隔離失敗，2 量測完成但未達門檻。
+結束碼：0 通過門檻，1 隔離失敗，2 量測完成但未達門檻，3 無法確認 sinks 全部停用。
+其他執行例外以非零碼結束；即使量測通過，清理失敗也不得回傳 0。
 
 先前輪次的本機操作／原始 API 設定快照位於 `/private/tmp/ga4-mcp-test-cloud-audit/`，不含
 access token 或 secret 值。合成 fixture SQL 位於 `/private/tmp/ga4-mcp-test-routing-plan/`；不可把暫存
