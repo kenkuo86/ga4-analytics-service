@@ -593,6 +593,12 @@ history 或與 GA Analytics request 無關的文字。所有文字欄位與陣�
 原始事件及其 Cloud Logging、BigQuery、衍生表與匯出副本均適用相同或更短期限；不能僅刪
 dashboard 欄位。下述最小化 activation ledger 是獨立核准的保存類別，不延長原始事件期限。
 
+POC owner 已核准兩項平台例外：BigQuery active TTL 後 2 天 time travel 與 7 天 fail-safe；
+過期事件若繞過 application expiry guard 重送，可能仍在 BigQuery 串流暫存區可查，平台
+不保證移出／清理時間。應用程式仍拒送過期資料，分析函數仍依原 event_time 排除過期資料；
+不得將此例外擴大為延長正常事件 TTL 或任意長期複製。相關驗收按此已核准例外揭露結果，
+不宣稱第 31 天底層所有副本均立即不可讀。完整授權與實測見 `docs/usage-routing-validation.md`。
+
 第一版即採分流，不是可選的差異 TTL：canonical event 的 `request_summary` 固定寫 null、
 `request_summary_source` 固定寫 unavailable，表示「此紀錄未攜帶摘要」，不表示 host 未提供。
 只有摘要附件保存實際來源。完成 redaction／長度限制後，才可向獨立受限 log／table 寫入

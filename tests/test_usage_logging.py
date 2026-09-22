@@ -5,7 +5,7 @@ import time
 from contextlib import redirect_stdout, redirect_stderr
 from queue import Empty
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from query_policy import QueryPolicyError
 from usage_contract import UsageEvent
@@ -26,6 +26,24 @@ def drain(emitter):
 
 
 class LoggingTests(unittest.TestCase):
+    def test_writer_distinguishes_attachment_from_event_but_keeps_retry_id(self):
+        writer = usage.LoggingWriter('ga4-reports-dev')
+        writer.session = Mock()
+        event = {'interaction_id':'00000000-0000-4000-8000-000000000001',
+                 'event_time':'2026-09-21T00:00:00Z',
+                 'event_name':'analytics_request_completed'}
+        attachment = dict(event, event_name='analytics_request_summary')
+        writer(event)
+        writer(attachment)
+        writer(event)
+        bodies = [call.kwargs['json'] for call in writer.session.post.call_args_list]
+        entries = [body['entries'][0] for body in bodies]
+        self.assertNotEqual(entries[0]['insertId'], entries[1]['insertId'])
+        self.assertEqual(entries[0]['insertId'], entries[2]['insertId'])
+        self.assertEqual(entries[0]['timestamp'], entries[1]['timestamp'])
+        self.assertTrue(bodies[0]['logName'].endswith('/ga4_mcp_test_v1'))
+        self.assertTrue(bodies[1]['logName'].endswith('/ga4_mcp_test_summary_v1'))
+
     def setUp(self):
         self.emitter = usage.BoundedEmitter(lambda row: None, enabled=True, summaries=True, start_worker=False)
         self.patch = patch.object(usage,'emitter',self.emitter)

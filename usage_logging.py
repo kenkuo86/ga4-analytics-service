@@ -176,11 +176,14 @@ class LoggingWriter:
             from google.auth.transport.requests import AuthorizedSession
             credentials, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/logging.write'])
             self.session = AuthorizedSession(credentials, max_refresh_attempts=0)
-        log = 'ga4_usage_summary_v1' if record['event_name'] == 'analytics_request_summary' else 'ga4_usage_v1'
+        log = 'ga4_mcp_test_summary_v1' if record['event_name'] == 'analytics_request_summary' else 'ga4_mcp_test_v1'
         body = {'logName':f'projects/{self.project}/logs/{log}',
                 'resource':{'type':'global','labels':{'project_id':self.project}},
                 'labels':{'usage_environment':'pilot','usage_schema':'1.0'},
-                'entries':[{'timestamp':record['event_time'],'insertId':record['interaction_id'], 'jsonPayload':record}]}
+                # Logging deduplicates by project/timestamp/insertId, even across log names.
+                # Keep retries stable while distinguishing the canonical event and attachment.
+                'entries':[{'timestamp':record['event_time'],
+                            'insertId':f"{record['interaction_id']}:{record['event_name']}", 'jsonPayload':record}]}
         response = self.session.post('https://logging.googleapis.com/v2/entries:write', json=body, timeout=2)
         response.raise_for_status()
 
@@ -381,8 +384,10 @@ def consent_usage_notice():
         return ''
     summary = '經清理的當次需求摘要另存30天。' if emitter.summaries else '目前不保存文字摘要。'
     return ('<section aria-labelledby="usage-title"><h2 id="usage-title">內部產品使用分析</h2>'
-            '<p>為改善GA Analytics，服務會記錄匿名化使用者識別、工具、客戶識別、指標、期間、'
+            '<p>為改善GA Analytics，服務會記錄雜湊後的使用者識別、工具、客戶識別、指標、期間、'
             '處理結果與耗時，結構化事件保存180天。' + summary +
+            '到期資料不納入分析；雲端歷史復原與緊急備援另保留2天及7天。'
+            'POC期間，過期資料若被重新送入，可能暫留雲端暫存區並可由原始資料管理者查詢，清理時間無固定保證。'
             '首次成功使用紀錄的保存上限為量測開始起一年，不因回訪延長。'
             '不保存登入憑證、完整對話、SQL或查詢結果。資料由服務負責人管理，'
             '既有GCP管理員及管理用服務帳戶保留管理存取權。'

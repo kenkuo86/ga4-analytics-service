@@ -26,9 +26,9 @@ REST GET 不新增文字摘要參數，只提供 enum hints；不可將完整使
 - Queue 容量256，request 使用 put_nowait，滿載丟棄並增加無payload計數。
 - Worker 為 daemon thread，Logging POST timeout 2秒、最多兩次嘗試。ADC／token refresh
   也只在worker，可能比POST timeout更久；queue保持有界，不讓呼叫等待credential或sink。
-- 收集目的固定 ga4-reports-dev；log names為 ga4_usage_v1／ga4_usage_summary_v1，
+- 收集目的固定 ga4-reports-dev；log names為 ga4_mcp_test_v1／ga4_mcp_test_summary_v1，
   labels usage_environment=pilot、usage_schema=1.0。使用原terminal event_time作Logging
-  timestamp，UUID作insertId；BigQuery仍必須以contract key去重，不承諾exactly-once。
+  timestamp，UUID加event_name作insertId（避免事件與摘要在Logging跨log去重時互相覆蓋）；BigQuery仍必須以contract key去重，不承諾exactly-once。
 - 摘要只寫獨立log，不寫stdout。Worker每30秒將僅有固定code／整數的diagnostics寫stdout；
   計數包括enqueued、delivered、queue_full、delivery_failure／dropped、expired_dropped、
   observation／serialization failure及tenant品質。這些計數不含event payload或exception。

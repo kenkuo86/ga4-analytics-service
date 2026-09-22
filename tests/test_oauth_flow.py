@@ -76,6 +76,8 @@ class OAuthFlowTests(unittest.TestCase):
                 response,_=self._get_consent_page()
             self.assertIn('結構化事件保存180天',response.text)
             self.assertIn('量測開始起一年',response.text)
+            self.assertIn('另保留2天及7天',response.text)
+            self.assertIn('清理時間無固定保證',response.text)
             self.assertIn('另存30天' if summaries else '目前不保存文字摘要',response.text)
             self.assertNotIn('USAGE_IDENTITY_KEY',response.text)
 

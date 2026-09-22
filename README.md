@@ -421,3 +421,16 @@ REST 只提供 enum hints，避免摘要進入 GET URL／access logs。舊 clien
 Usage emission 由 `USAGE_ENABLED` 控制，摘要另由 `USAGE_SUMMARY_ENABLED` 控制，預設都為 false。
 啟用前須完成 [雲端路由驗收](docs/usage-logging.md)，不可直接開關收集而略過 IAM／TTL／告知。
 背景 writer 僅寫 `ga4-reports-dev` 的專用 Cloud Logging log，不在 request 中等待網路或寫 BigQuery。
+
+11.5 的離線[資源計畫與驗收順序](docs/usage-routing.md)可由 `scripts/plan_usage_routing.py`
+產生。已獲授權建立資源並完成[合成驗收](docs/usage-routing-validation.md)。
+
+到達率由 `scripts/probe_usage_routing.py`（純邏輯、永不連網）與
+`scripts/run_usage_routing_probe.py`（網路層，需 `--apply`）量測。Cloud Logging 不承諾
+exactly-once，因此驗收是**量測並揭露到達率**，不宣稱零遺失；rollout 門檻為 canonical 事件
+送達 BigQuery ≥ 95%，以 Wilson 95% 信賴下界判定。探針先寫 canary 確認路由真正生效才開始
+量測——sink 啟用後的生效時間是變動的且可超過 300 秒，等固定秒數會把傳播窗口內的靜默丟棄
+算進遺失率。每條 sink 各自獨立丟棄，故 Logging bucket 的副本不能用來稽核 BigQuery 的副本；
+KPI 的權威來源是 BigQuery。
+
+過期重送在BQ串流暫存仍可查，owner已接受此POC保存例外；仍拒送／排除過期資料。四條路由已停用，未部署或啟用真實收集。
