@@ -1,4 +1,4 @@
-# Phase 11.5 合成驗收紀錄（2026-09-21）
+# Phase 11.5 合成驗收紀錄（2026-09-21–22）
 
 資源已依 owner 授權建立於 `ga4-reports-dev`／`asia-east1`。**尚未完成 11.5 acceptance，
 四條 sinks 已停用、未部署、未啟用真實資料收集。** PR 維持 Draft，不應標為可合併。
@@ -53,7 +53,7 @@ Owner 已核准的 2 天 time travel＋7 天 fail-safe 是資料到期後的復�
 ### _Default 排除規則傳播
 
 具名 exclusion 於 08:01:35 UTC 建立；第一批 08:02:50 UTC 合成摘要仍在 `_Default` 留下
-1 筆副本，後續修正 insertId 的測試紀錄沒有出現在該 bucket。觀察符合路由設定傳播尚未
+1 筆副本。後續的零筆觀察原先未驗證分頁完整，須依下方重新查核結果判讀。觀察符合路由設定傳播尚未
 完成的可能情況，但未以此推論所有新路由都已完全生效。未刪共用 bucket 或其他日誌。
 
 該副本只有合成文字，沒有帳號／客戶資料；仍受既有 `_Default` 保存政策管制。真實收集
@@ -64,16 +64,20 @@ Owner 已核准的 2 天 time travel＋7 天 fail-safe 是資料到期後的復�
 各 1 筆，在 `_Default` 為 0 筆；同組事件在兩張 BQ 原始表亦各 1 筆，
 該查詢預估處理 312 bytes、實際計費 20 MiB（BQ 最低計費單位），低於 100 MB 上限。
 驗收結束四條 sinks 均已停用。前一輪在啟用後立即發出的
-probe 未到達，未將其列為通過。未來啟用前須使用有次數上限的合成 probe 確認路由及排除
+probe 未確認到達，未將其列為通過。未來啟用前須使用有次數上限的合成 probe 確認路由及排除
 規則真正生效，而非只等待固定秒數。
+
+2026-09-22 已用完整分頁重查上述 `c0b91a78-92e6-4c3f-826a-75662b72514c`：
+六個查詢均無後續頁，兩個專用 bucket 各 1、`_Default` 0，確認該次結果有效。
 
 ### 權限正反向測試
 
-設定檢查已完成，但目前 owner CLI 身分呼叫 runtime SA generateAccessToken 回傳 403，
-因此未能以該 SA 實際執行讀寫拒絕驗收；也未代替一般同事登入測試。沒有自行新增
-Token Creator 或 impersonation 權限。此兩項不得標示為通過，需在後續驗收安排執行身分。
+Owner 已明確核准以下限時 impersonation 驗收。以 runtime SA 執行確認：兩張原始表
+`tabledata.list` 均回 403，`tables.testIamPermissions` 的 getData／updateData 均為空；
+identity secret 的 `secretmanager.versions.access` 存在，未讀取金鑰內容。
+未代替一般員工登入，該反例仍須在 pilot 安排，不能以 SA 測試代替全體員工的有效權限。
 
-#### 待授權的 runtime SA 驗收計畫
+#### 已核准的 runtime SA 驗收範圍
 
 - 在單一 `ga4-analytics-service@ga4-reports-dev.iam.gserviceaccount.com` 的 IAM policy
   暫加 `user:kenkuo@wenk-media.com` 的 `roles/iam.serviceAccountTokenCreator`。不在
@@ -92,7 +96,51 @@ Token Creator 或 impersonation 權限。此兩項不得標示為通過，需在
   保留他人同期變更；確認已移除。移除 binding 不使已發 token 立即失效，token 最遲
   於發出後 5 分鐘到期。即使過程中斷，binding 的 1 小時期限也不自動展延。
 
-此新增 impersonation 授權尚未獲 owner 同意，因此目前不執行。
+此新增 impersonation 授權已獲 owner 明確同意。首次有效 conditional binding 截止為
+2026-09-21T16:22:43Z；後續重試使用同一截止，不自動展延。取得 5 分鐘 token 後即先
+移除本次 binding，再執行權限檢查。沒有新增 service account key、改 ADC 或資料角色。
+
+初次工具呼叫因 getIamPolicy HTTP 方法錯誤而失敗，當時尚未新增授權；改用官方 POST
+後才執行授權。第一輪 BQ／Secret 權限檢查通過，Logging 寫入 API 成功，但短時間內
+未完整確認事件／摘要到達；後續唯讀僅查到主事件，未將整輪到達驗收標為通過。
+四條 sinks 與臨時 binding 均清理後，第二輪改成先以 owner canary 驗證 routing readiness，
+通過才 mint SA token；第二輪 readiness 未通過，因此未再次授權或 mint token。
+兩輪均完成 sinks 停用與本次 binding 清理；原授權期限已過，不自動重新授權。
+
+### 2026-09-22 完整分頁重查
+
+獨立 review 發現 P1 驗收缺陷：舊臨時腳本只讀 `entries.list` 第一頁，未處理
+`nextPageToken`，可能把尚未搜尋完判成 0。舊零筆觀察不能直接證明未到達或已隔離。
+修正後查詢指定單一 logName、事件前後數分鐘、`timestamp desc`，逐頁保存原始回覆，
+直到沒有 token 才判定完成；超過 30 頁則標示未完成，不得作為零筆通過證據。
+舊 `runtime-iam.py`／`readiness.py`／`cloud-final-check.py` 不應原樣重跑。
+
+以 owner 唯讀重查原 runtime SA 的四個 interaction ID，六個 bucket/logName 查詢
+均在第一頁完整結束。只有 `c2f927a5-cbfa-4519-9f1b-217f8f448367` 的 canonical 在
+專用 Logging bucket 可查到 1 筆；四組 summary 均未查到；`_Default` 均為 0。
+BQ 兩張原始表查到上述 canonical 及 `350e74d6-1046-49e8-8ee2-f6f0915e3e44`
+的 summary 各 1 筆，其餘未找到。查詢預估 624 bytes，實際計費 20 MiB。
+這證明 runtime SA 曾成功送達兩類 BQ 資料，但沒有同 UUID 完整到達所有目的地的證據；
+不能宣稱 end-to-end acceptance 通過，也不能把缺漏全部歸因於分頁或權限。
+
+### Owner 受控批次與下一輪驗收邊界
+
+2026-09-22 以原 owner 權限啟用四條 sinks，確認 API enabled 後等待 180 秒，再送兩批、
+共四組 canonical＋summary（共 8 筆）。每批同時測試 `UUID:event_name` 與獨立 insertId，
+原始 write body／成功回覆皆保存；不新增 IAM、不 mint SA token。查詢逐 logName 完整分頁，
+最多八輪，觀察時不重送、不切換 sinks。逐筆比對預期與實際
+`(interaction_id, event_name, logName, insertId)` multiset，不能只用總數判為通過。
+
+八輪 Logging 查詢結束後，逐鍵核對只找到第一批兩組，第二批兩組未找到：
+每個專用 bucket 預期 4、實際 2，`_Default` 0；整輪判定未通過。
+BQ 最後查詢亦僅第一批兩組各 canonical／summary，共 4 筆。
+不能用這個小樣本推算正式遺失率，也尚不能認定永久遺失或平台故障。
+
+舊授權限定原始一小時且不自動展延。若重新驗證 runtime 的完整同 UUID 路由，須先由
+owner 核准新一輪同範圍的一小時 conditional binding／最長五分鐘 token；只對同一 SA
+授 Token Creator，取得 token 後立即撤除，owner 負責後續唯讀到達查核。
+先通過 owner readiness 才授權，未通過則停止；不改 BQ／Secret 資料角色，不部署或啟用
+真實收集。新一輪授權尚未取得、尚未執行。
 
 ## 實際指令與證據
 
@@ -118,6 +166,14 @@ python /private/tmp/ga4-mcp-test-cloud-validate.py inspect
 python /private/tmp/ga4-mcp-test-cloud-validate.py lock-tables
 python /private/tmp/ga4-mcp-test-cloud-validate.py cases
 python /private/tmp/ga4-mcp-test-cloud-apply.py disable
+python /private/tmp/ga4-mcp-test-runtime-iam.py
+# 下列為修正完整分頁後的唯讀重查／owner 合成測試
+python /private/tmp/ga4-mcp-test-paginated-recheck.py
+python /private/tmp/ga4-mcp-test-readiness-recheck.py
+python /private/tmp/ga4-mcp-test-delivery-diagnostic.py
+python /private/tmp/ga4-mcp-test-check-delivery-evidence.py
+python /private/tmp/ga4-mcp-test-cloud-query.py /private/tmp/ga4-mcp-test-routing-plan/delivery-bq-check.sql --execute
+python /private/tmp/ga4-mcp-test-cloud-query.py /private/tmp/ga4-mcp-test-routing-plan/runtime-bq-recheck.sql --execute
 
 # 每份 SQL 都先 jobs.insert dryRun，再 jobs.query；maximumBytesBilled=100000000
 python /private/tmp/ga4-mcp-test-cloud-query.py /private/tmp/ga4-mcp-test-routing-plan/events-dedup.sql --execute
@@ -132,10 +188,13 @@ python /private/tmp/ga4-mcp-test-cloud-query.py /private/tmp/ga4-mcp-test-routin
 git diff --check
 ```
 
-上述完整測試 216 項通過；修正後獨立 reviewer 重跑 logging 10 項與 routing 5 項，無 P0／P1。
-嚴格立即清理不成立，依 owner 已核准的 POC 例外揭露；IAM 正反向驗收仍待執行。查詢回報 totalBytesBilled=0（當時資料在串流區），這不代表 Logging、
+2026-09-22 再次完整測試 216 項通過；完整分頁與逐鍵驗收修正經獨立 reviewer
+複核，無剩餘 P0／P1；路由尚未通過仍維持 Draft。
+上述程式修正後獨立 reviewer 重跑 logging 10 項與 routing 5 項，無 P0／P1。
+嚴格立即清理不成立，依 owner 已核准的 POC 例外揭露；Runtime BQ 拒絕／Secret 權限檢查已通過；完整路由及一般員工驗收尚未通過。查詢回報 totalBytesBilled=0（當時資料在串流區），這不代表 Logging、
 Secret Manager 或後續查詢免費，也不能當營運成本估算。
 
 官方依據：
+[Logging entries.list 分頁](https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/entries/list)、
 [LogEntry insertId 去重](https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry)、
 [BigQuery 串流的分區處理](https://docs.cloud.google.com/bigquery/docs/write-api-rest#time-unit_column_partitioning)。
