@@ -578,6 +578,7 @@ def _combine_identity_continuity(*values: bool | None) -> bool | None:
 class HistoryCoverage:
     """Evidence needed before publishing long-lived activation/cohort KPIs."""
 
+    measurement_version: str | None = None
     measurement_start: date | None = None
     measurement_end: date | None = None
     event_history_start: date | None = None
@@ -594,6 +595,12 @@ class HistoryCoverage:
 
     def evaluate(self, *, report_end: date, ledger_version: str | None = None) -> dict[str, Any]:
         reasons = list(self.extra_reasons)
+        if self.measurement_version is None:
+            reasons.append("measurement_version_missing")
+        elif _valid_code(self.measurement_version) is None:
+            reasons.append("measurement_version_invalid")
+        elif ledger_version is not None and self.measurement_version != ledger_version:
+            reasons.append("measurement_version_mismatch")
         if self.measurement_start is None:
             reasons.append("measurement_start_missing")
         if self.measurement_end is None:
@@ -706,6 +713,11 @@ class ActivationLedger:
         pipeline; no event payload or tenant data is retained in the ledger.
         """
         prepared, quality = _prepare_events(events)
+        if quality["invalid_events_dropped"]:
+            # A rejected canonical source row might be an unrecorded first
+            # success.  Do not partially apply the batch or claim continuity.
+            self.mark_pipeline_gap()
+            raise KPIInputError("ledger batch contains invalid canonical events")
         if as_of is not None:
             cutoff = _parse_datetime(as_of, name="as_of")
         else:
@@ -769,6 +781,7 @@ class ActivationLedger:
             identity_continuous,
         )
         return HistoryCoverage(
+            measurement_version=self.measurement_version,
             measurement_start=self.measurement_start.date() if self.measurement_start else None,
             measurement_end=self.retention_end.date() if self.retention_end else None,
             event_history_start=_history_date(event_history_start, ZoneInfo("UTC")),
@@ -851,6 +864,7 @@ def _history_from_input(
         return coverage
     if isinstance(supplied, Mapping):
         coverage = HistoryCoverage(
+            measurement_version=_valid_code(supplied.get("measurement_version")),
             measurement_start=_history_date(supplied.get("measurement_start"), zone),
             measurement_end=_history_date(supplied.get("measurement_end"), zone),
             event_history_start=_history_date(supplied.get("event_history_start"), zone),
@@ -899,6 +913,7 @@ def _history_from_input(
             pipeline_complete=history_complete,
         )
     return HistoryCoverage(
+        measurement_version=_valid_code(measurement_version),
         measurement_start=_history_date(measurement_start, zone),
         event_history_start=_history_date(event_history_start, zone),
         event_history_end=_history_date(event_history_end, zone),
@@ -1007,24 +1022,40 @@ def _retention(
     ]
     if not records:
         return {"status": "no_cohort", "reason": None, "w0_users": 0, "mature_users": 0, "retained_users": 0, "rate": None}
-    mature: list[ActivationRecord] = []
-    immature = 0
-    for record in records:
-        w0 = record.first_success_at.astimezone(zone).date() - timedelta(days=record.first_success_at.astimezone(zone).weekday())
-        if report_local >= w0 + timedelta(days=34):
-            mature.append(record)
-        else:
-            immature += 1
-    if not mature:
-        return {"status": "not_mature", "reason": "w4_window_not_complete", "w0_users": len(records), "mature_users": 0, "immature_users": immature, "retained_users": None, "rate": None}
     history_start = _parse_date_or_none(coverage.get("event_history_start"))
     history_end = _parse_date_or_none(coverage.get("event_history_end"))
-    needed_end = max(
-        record.first_success_at.astimezone(zone).date() - timedelta(days=record.first_success_at.astimezone(zone).weekday()) + timedelta(days=34)
-        for record in mature
-    )
-    if history_start is None or history_end is None or history_start > min(record.first_success_at.astimezone(zone).date() - timedelta(days=record.first_success_at.astimezone(zone).weekday()) for record in mature) or history_end < needed_end:
-        return {"status": "insufficient_history", "reason": "follow_up_window_not_covered", "w0_users": len(records), "mature_users": len(mature), "retained_users": None, "rate": None}
+    measurement_end = _parse_date_or_none(coverage.get("measurement_end"))
+    mature: list[ActivationRecord] = []
+    immature = 0
+    uncovered = 0
+    for record in records:
+        w0 = record.first_success_at.astimezone(zone).date() - timedelta(days=record.first_success_at.astimezone(zone).weekday())
+        w4_end = w0 + timedelta(days=34)
+        if report_local < w4_end:
+            immature += 1
+        elif (
+            history_start is None
+            or history_end is None
+            or measurement_end is None
+            or history_start > w0
+            or history_end < w4_end
+            or w4_end >= measurement_end
+        ):
+            uncovered += 1
+        else:
+            mature.append(record)
+    if not mature:
+        if uncovered:
+            return {
+                "status": "insufficient_history",
+                "reason": "follow_up_window_not_covered",
+                "w0_users": len(records),
+                "mature_users": 0,
+                "immature_users": immature + uncovered,
+                "retained_users": None,
+                "rate": None,
+            }
+        return {"status": "not_mature", "reason": "w4_window_not_complete", "w0_users": len(records), "mature_users": 0, "immature_users": immature, "retained_users": None, "rate": None}
     retained: set[str] = set()
     for event in _success_analytics(all_events):
         user_id = _user_id(event)
@@ -1035,7 +1066,7 @@ def _retention(
             w0 = record.first_success_at.astimezone(zone).date() - timedelta(days=record.first_success_at.astimezone(zone).weekday())
             if record.user_id == user_id and w0 + timedelta(days=28) <= local_date <= w0 + timedelta(days=34):
                 retained.add(user_id)
-    return {"status": "available", "reason": None, "w0_users": len(records), "mature_users": len(mature), "immature_users": immature, "retained_users": len(retained), "rate": _safe_rate(len(retained), len(mature))}
+    return {"status": "available", "reason": None, "w0_users": len(records), "mature_users": len(mature), "immature_users": immature + uncovered, "retained_users": len(retained), "rate": _safe_rate(len(retained), len(mature))}
 
 
 def _parse_date_or_none(value: Any) -> date | None:

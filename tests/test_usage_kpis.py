@@ -113,6 +113,15 @@ class ActivationLedgerTests(unittest.TestCase):
         self.assertEqual(result["inserted_users"], 0)
         self.assertEqual(self.ledger.snapshot()[0].first_success_at.isoformat(), "2026-08-03T01:00:00+00:00")
 
+    def test_malformed_canonical_batch_fails_without_partial_ledger_update(self):
+        valid = event(1, "2026-08-03T01:00:00Z")
+        malformed = dict(event(2, "2026-08-04T01:00:00Z"), interaction_id="bad")
+        result = update_activation_ledger(self.ledger, [valid, malformed])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_code"], "ledger_update_failed")
+        self.assertTrue(self.ledger.pipeline_gap)
+        self.assertEqual(self.ledger.snapshot(), ())
+
     def test_calendar_year_retention_and_deletion_degrade_history(self):
         leap = ActivationLedger(measurement_start="2024-02-29T00:00:00Z", policy_approved=True)
         self.assertEqual(leap.retention_end.isoformat(), "2025-02-28T00:00:00+00:00")
@@ -158,6 +167,7 @@ class KPIViewTests(unittest.TestCase):
 
     def complete_history(self):
         return HistoryCoverage(
+            measurement_version="pilot-v1",
             measurement_start=datetime(2026, 8, 1).date(),
             measurement_end=datetime(2027, 8, 1).date(),
             event_history_start=datetime(2026, 8, 1).date(),
@@ -177,6 +187,7 @@ class KPIViewTests(unittest.TestCase):
         )
         unattested.apply(event_history)
         mapping_without_attestation = {
+            "measurement_version": "pilot-v1",
             "measurement_start": "2026-08-01",
             "measurement_end": "2027-08-01",
             "event_history_start": "2026-08-01",
@@ -256,6 +267,7 @@ class KPIViewTests(unittest.TestCase):
         )
         ledger.apply(events)
         history = HistoryCoverage(
+            measurement_version="pilot-v1",
             measurement_start=datetime(2026, 8, 1).date(),
             measurement_end=datetime(2027, 8, 1).date(),
             event_history_start=datetime(2026, 8, 1).date(),
@@ -278,6 +290,83 @@ class KPIViewTests(unittest.TestCase):
         self.assertEqual(view["activation"]["cumulative_users"], 1)
         self.assertEqual(view["retention"]["status"], "not_mature")
         self.assertIsNone(view["retention"]["rate"])
+
+    def test_retention_publishes_only_cohorts_with_proven_follow_up(self):
+        events = [
+            event(1, "2026-08-03T01:00:00Z", who="alice"),
+            event(2, "2026-08-31T01:00:00Z", who="alice"),
+            event(3, "2026-08-10T01:00:00Z", who="bob"),
+            event(4, "2026-09-07T01:00:00Z", who="bob"),
+        ]
+        self.ledger.apply(events)
+        history = HistoryCoverage(
+            measurement_version="pilot-v1",
+            measurement_start=datetime(2026, 8, 1).date(),
+            measurement_end=datetime(2027, 8, 1).date(),
+            event_history_start=datetime(2026, 8, 1).date(),
+            event_history_end=datetime(2026, 9, 6).date(),
+            ledger_available=True,
+            ledger_policy_approved=True,
+            identity_continuous=True,
+            pipeline_complete=True,
+        )
+        view = build_kpi_view(
+            events,
+            "2026-08-03",
+            "2026-08-16",
+            ledger=self.ledger,
+            history=history,
+            as_of="2026-09-30T00:00:00Z",
+        )
+        self.assertEqual(view["retention"]["status"], "available")
+        self.assertEqual(view["retention"]["w0_users"], 2)
+        self.assertEqual(view["retention"]["mature_users"], 1)
+        self.assertEqual(view["retention"]["retained_users"], 1)
+        self.assertEqual(view["retention"]["rate"], 1.0)
+
+    def test_history_attestation_must_match_ledger_measurement_version(self):
+        events = [event(1, "2026-08-03T01:00:00Z", who="alice")]
+        self.ledger.apply(events)
+        mismatched = {
+            "measurement_version": "pilot-v2",
+            "measurement_start": "2026-08-01",
+            "measurement_end": "2027-08-01",
+            "event_history_start": "2026-08-01",
+            "event_history_end": "2026-09-30",
+            "ledger_available": True,
+            "ledger_policy_approved": True,
+            "identity_continuous": True,
+            "pipeline_complete": True,
+        }
+        view = build_kpi_view(
+            events,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=self.ledger,
+            history=mismatched,
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(view["activation"]["status"], "degraded")
+        self.assertIsNone(view["activation"]["cumulative_users"])
+        self.assertIn(
+            "measurement_version_mismatch",
+            view["activation"]["history_coverage"]["reasons"],
+        )
+
+        missing_version = dict(mismatched)
+        missing_version.pop("measurement_version")
+        missing_view = build_kpi_view(
+            events,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=self.ledger,
+            history=missing_version,
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertIn(
+            "measurement_version_missing",
+            missing_view["activation"]["history_coverage"]["reasons"],
+        )
 
     def test_funnel_never_invents_external_denominators_and_excludes_invalid_mcp_calls(self):
         events = [

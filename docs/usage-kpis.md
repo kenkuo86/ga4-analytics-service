@@ -58,6 +58,8 @@ retention。Ledger 刪除、到期、pipeline gap 或 key rotation 造成的斷�
 `data_freshness.history.reasons`；不能把重新出現的 user 當成新人，也不能把缺失 follow-up
 填成零。Identity continuity 必須由 pipeline 對 measurement version 明確提供正向證據；
 欄位缺失、null 或尚未驗證都視為未知並 fail closed，不因建立新 ledger 自動推定連續。
+History attestation 的 `measurement_version` 必須與 ledger 相同；缺失或版本不符時不得沿用
+其他量測版本的 continuity／coverage 證據。
 
 W4 retention 以首次 activation 所在的週一至週日為 W0，W4 是 W0 後第 28–34 天。只有已完整
 觀察至 W4 結束、ledger 與 event history 均連續的 cohort 才進分母；未成熟 cohort 回傳
@@ -66,7 +68,9 @@ W4 則逐 cohort 以已證明的 `known_event_end` 判斷 `w0 + 34` 是否完整
 34 天需求連帶隱藏仍可可靠發布的 activation。
 
 背景工作應透過 `update_activation_ledger` 呼叫 ledger。來源故障或批次格式錯誤只回傳固定
-`ledger_update_failed` 並標示 pipeline gap，不把 exception 傳回原本的 GA4 request。
+`ledger_update_failed` 並標示 pipeline gap，不把 exception 傳回原本的 GA4 request。Canonical
+batch 只要含無法驗證的 row 就不做部分更新；synthetic probe 與 duplicate 仍屬可預期排除，
+不會被誤判成來源缺口。
 
 週報 SQL 的輸入範圍上限為 146 個含首尾日期；加上 W4 follow-up 後仍落在 canonical 180
 天來源函式的 bounded range。metadata 空表、measurement version 不一致、保存政策未核准、
