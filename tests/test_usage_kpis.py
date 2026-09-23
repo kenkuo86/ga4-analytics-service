@@ -220,6 +220,21 @@ class KPIViewTests(unittest.TestCase):
         self.assertEqual(view["funnel"]["authorized"]["count"], 1)
         self.assertEqual(view["funnel"]["conversion_rates"]["authorized_over_eligible"], 1.0)
 
+    def test_mixed_transport_funnel_does_not_publish_non_step_rate(self):
+        view = build_kpi_view(
+            [
+                event(1, "2026-09-07T01:00:00Z", who="alice", transport="mcp"),
+                event(2, "2026-09-07T02:00:00Z", who="bob", transport="rest"),
+            ],
+            "2026-09-07",
+            "2026-09-07",
+            as_of="2026-09-08T00:00:00Z",
+        )
+        funnel = view["funnel"]
+        self.assertEqual(funnel["tried"]["count"], 1)
+        self.assertEqual(funnel["activated"]["count"], 2)
+        self.assertIsNone(funnel["conversion_rates"]["activated_over_tried"])
+
     def test_quality_and_demand_keep_preflight_separate_and_do_not_weight_rows(self):
         events = [
             event(1, "2026-09-07T01:00:00Z", kind="capability_preflight", subject="cross_source", status="unsupported", resolution="unsupported", metrics=["candidate"], dimensions=[]),

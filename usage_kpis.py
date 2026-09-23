@@ -889,7 +889,16 @@ def _funnel(
     conversion = {
         "authorized_over_eligible": _safe_rate(authorized_count, eligible_count),
         "tried_over_authorized": _safe_rate(len(tried_users), authorized_count),
-        "activated_over_tried": _safe_rate(len(activated_users), len(tried_users)),
+        # REST activation is observable without an MCP tool-call stage.  In
+        # that mixed-transport case the two sets are not a staircase funnel,
+        # so a ratio could exceed 100% and would be misleading (and invalid
+        # for the versioned rate contract).  Keep the stage counts, but make
+        # the non-comparable rate explicitly unavailable.
+        "activated_over_tried": (
+            _safe_rate(len(activated_users), len(tried_users))
+            if activated_users.issubset(tried_users)
+            else None
+        ),
     }
     return {
         "eligible": stage(eligible_count, None if eligible_users is not None else "external_denominator_unavailable"),
@@ -901,7 +910,7 @@ def _funnel(
             "tried": len(tried_users),
             "activated": len(activated_users),
         },
-        "transport_note": "REST activation can exist without an MCP tried stage; stages are not forced into a strict funnel.",
+        "transport_note": "REST activation can exist without an MCP tried stage; mixed transport stages are not forced into a strict funnel and activated_over_tried is null when the stages are not comparable.",
     }
 
 
