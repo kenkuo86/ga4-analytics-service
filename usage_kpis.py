@@ -607,17 +607,19 @@ class HistoryCoverage:
             reasons.append("measurement_end_missing")
         if self.measurement_end is not None and report_end >= self.measurement_end:
             reasons.append("measurement_window_expired")
-        if not self.ledger_available:
+        if self.ledger_available is not True:
             reasons.append("ledger_unavailable")
-        if not self.ledger_policy_approved:
+        if self.ledger_policy_approved is not True:
             reasons.append("ledger_policy_unapproved")
-        if self.ledger_deleted:
+        if not isinstance(self.ledger_deleted, bool):
+            reasons.append("ledger_deletion_status_invalid")
+        elif self.ledger_deleted is True:
             reasons.append("ledger_deleted_or_expired")
         if self.identity_continuous is False:
             reasons.append("identity_continuity_break")
         elif self.identity_continuous is not True:
             reasons.append("identity_continuity_unverified")
-        if not self.pipeline_complete:
+        if self.pipeline_complete is not True:
             reasons.append("pipeline_gap_or_watermark_unknown")
         elif self.event_history_start is None or self.event_history_end is None:
             reasons.append("event_history_bounds_missing")
@@ -852,12 +854,12 @@ def _history_from_input(
                 measurement_start=measurement_start_date,
                 measurement_end=measurement_end_date,
                 ledger_available=True,
-                ledger_policy_approved=coverage.ledger_policy_approved and ledger.policy_approved,
+                ledger_policy_approved=coverage.ledger_policy_approved is True and ledger.policy_approved,
                 identity_continuous=_combine_identity_continuity(
                     coverage.identity_continuous,
                     ledger.identity_continuous,
                 ),
-                pipeline_complete=coverage.pipeline_complete and not ledger.pipeline_gap,
+                pipeline_complete=coverage.pipeline_complete is True and not ledger.pipeline_gap,
                 ledger_deleted=coverage.ledger_deleted or ledger.deleted_or_expired,
                 extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
             )
@@ -869,8 +871,8 @@ def _history_from_input(
             measurement_end=_history_date(supplied.get("measurement_end"), zone),
             event_history_start=_history_date(supplied.get("event_history_start"), zone),
             event_history_end=_history_date(supplied.get("event_history_end"), zone),
-            ledger_available=bool(supplied.get("ledger_available", ledger is not None)),
-            ledger_policy_approved=bool(supplied.get("ledger_policy_approved", ledger_policy_approved)),
+            ledger_available=supplied.get("ledger_available") is True,
+            ledger_policy_approved=supplied.get("ledger_policy_approved") is True,
             # Only literal booleans are evidence. Missing, null and truthy
             # strings remain unknown and fail closed.
             identity_continuous=(
@@ -878,8 +880,8 @@ def _history_from_input(
                 if isinstance(supplied.get("identity_continuous"), bool)
                 else None
             ),
-            pipeline_complete=bool(supplied.get("pipeline_complete", history_complete)),
-            ledger_deleted=bool(supplied.get("ledger_deleted", False)),
+            pipeline_complete=supplied.get("pipeline_complete") is True,
+            ledger_deleted=supplied.get("ledger_deleted", False),
             extra_reasons=tuple(value for value in supplied.get("reasons", ()) if isinstance(value, str)),
         )
         if ledger is not None:
@@ -893,12 +895,12 @@ def _history_from_input(
                 measurement_start=measurement_start_date,
                 measurement_end=measurement_end_date,
                 ledger_available=True,
-                ledger_policy_approved=coverage.ledger_policy_approved and ledger.policy_approved,
+                ledger_policy_approved=coverage.ledger_policy_approved is True and ledger.policy_approved,
                 identity_continuous=_combine_identity_continuity(
                     coverage.identity_continuous,
                     ledger.identity_continuous,
                 ),
-                pipeline_complete=coverage.pipeline_complete and not ledger.pipeline_gap,
+                pipeline_complete=coverage.pipeline_complete is True and not ledger.pipeline_gap,
                 ledger_deleted=coverage.ledger_deleted or ledger.deleted_or_expired,
                 extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
             )
@@ -918,8 +920,8 @@ def _history_from_input(
         event_history_start=_history_date(event_history_start, zone),
         event_history_end=_history_date(event_history_end, zone),
         ledger_available=False,
-        ledger_policy_approved=ledger_policy_approved,
-        pipeline_complete=history_complete,
+        ledger_policy_approved=ledger_policy_approved is True,
+        pipeline_complete=history_complete is True,
     )
 
 

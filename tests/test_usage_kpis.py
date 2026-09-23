@@ -224,6 +224,40 @@ class KPIViewTests(unittest.TestCase):
             truthy_string_view["activation"]["history_coverage"]["reasons"],
         )
 
+        non_boolean_pipeline_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history={
+                **mapping_without_attestation,
+                "identity_continuous": True,
+                "pipeline_complete": "false",
+            },
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertIn(
+            "pipeline_gap_or_watermark_unknown",
+            non_boolean_pipeline_view["activation"]["history_coverage"]["reasons"],
+        )
+
+        non_boolean_policy_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history={
+                **mapping_without_attestation,
+                "ledger_policy_approved": "true",
+                "identity_continuous": True,
+            },
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertIn(
+            "ledger_policy_unapproved",
+            non_boolean_policy_view["activation"]["history_coverage"]["reasons"],
+        )
+
         attested_view = build_kpi_view(
             event_history,
             "2026-08-01",
