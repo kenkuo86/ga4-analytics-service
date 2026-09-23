@@ -565,6 +565,15 @@ def _history_date(value: Any, zone: ZoneInfo) -> date | None:
         return None
 
 
+def _combine_identity_continuity(*values: bool | None) -> bool | None:
+    """Combine attestations while preserving known negative evidence."""
+    if any(value is False for value in values):
+        return False
+    if any(value is True for value in values):
+        return True
+    return None
+
+
 @dataclass(frozen=True)
 class HistoryCoverage:
     """Evidence needed before publishing long-lived activation/cohort KPIs."""
@@ -755,6 +764,10 @@ class ActivationLedger:
         pipeline_complete: bool | None = None,
         identity_continuous: bool | None = None,
     ) -> HistoryCoverage:
+        combined_identity = _combine_identity_continuity(
+            self.identity_continuous,
+            identity_continuous,
+        )
         return HistoryCoverage(
             measurement_start=self.measurement_start.date() if self.measurement_start else None,
             measurement_end=self.retention_end.date() if self.retention_end else None,
@@ -762,8 +775,10 @@ class ActivationLedger:
             event_history_end=_history_date(event_history_end, ZoneInfo("UTC")),
             ledger_available=True,
             ledger_policy_approved=self.policy_approved,
-            identity_continuous=self.identity_continuous if identity_continuous is None else identity_continuous,
-            pipeline_complete=(not self.pipeline_gap) if pipeline_complete is None else pipeline_complete,
+            identity_continuous=combined_identity,
+            # A known gap cannot be overridden by a later positive argument;
+            # otherwise completeness must be positively attested.
+            pipeline_complete=not self.pipeline_gap and pipeline_complete is True,
             ledger_deleted=self.deleted_or_expired,
         )
 
@@ -811,19 +826,6 @@ def _history_from_input(
     ledger_policy_approved: bool,
     zone: ZoneInfo,
 ) -> HistoryCoverage:
-    def combine_identity_continuity(*values: bool | None) -> bool | None:
-        """Combine attestations without letting unknown override evidence.
-
-        Any known break wins.  Otherwise one positive pipeline or ledger
-        attestation is sufficient; complete absence remains unknown and must
-        fail closed in ``HistoryCoverage.evaluate``.
-        """
-        if any(value is False for value in values):
-            return False
-        if any(value is True for value in values):
-            return True
-        return None
-
     if isinstance(supplied, HistoryCoverage):
         coverage = supplied
         if ledger is not None:
@@ -838,7 +840,7 @@ def _history_from_input(
                 measurement_end=measurement_end_date,
                 ledger_available=True,
                 ledger_policy_approved=coverage.ledger_policy_approved and ledger.policy_approved,
-                identity_continuous=combine_identity_continuity(
+                identity_continuous=_combine_identity_continuity(
                     coverage.identity_continuous,
                     ledger.identity_continuous,
                 ),
@@ -878,7 +880,7 @@ def _history_from_input(
                 measurement_end=measurement_end_date,
                 ledger_available=True,
                 ledger_policy_approved=coverage.ledger_policy_approved and ledger.policy_approved,
-                identity_continuous=combine_identity_continuity(
+                identity_continuous=_combine_identity_continuity(
                     coverage.identity_continuous,
                     ledger.identity_continuous,
                 ),

@@ -132,6 +132,17 @@ class ActivationLedgerTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error_code"], "ledger_update_failed")
         self.assertTrue(self.ledger.pipeline_gap)
+        coverage = self.ledger.history_coverage(
+            event_history_start="2026-08-01",
+            event_history_end="2026-09-01",
+            pipeline_complete=True,
+        )
+        evaluated = coverage.evaluate(
+            report_end=datetime(2026, 9, 1).date(),
+            ledger_version="pilot-v1",
+        )
+        self.assertFalse(evaluated["can_publish_cumulative"])
+        self.assertIn("pipeline_gap_or_watermark_unknown", evaluated["reasons"])
 
 
 class KPIViewTests(unittest.TestCase):
@@ -214,6 +225,13 @@ class KPIViewTests(unittest.TestCase):
         self.assertEqual(attested_view["activation"]["cumulative_users"], 1)
 
         unattested.mark_identity_break()
+        direct_coverage = unattested.history_coverage(
+            event_history_start="2026-08-01",
+            event_history_end="2026-09-30",
+            pipeline_complete=True,
+            identity_continuous=True,
+        )
+        self.assertFalse(direct_coverage.identity_continuous)
         broken_view = build_kpi_view(
             event_history,
             "2026-08-01",
