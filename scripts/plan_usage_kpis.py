@@ -243,7 +243,6 @@ AS (
         AND COALESCE(metadata_evidence.known_event_end >= metadata_evidence.range_end, FALSE)
         AS activation_history_complete,
       metadata_evidence.ledger_history_complete
-        AND COALESCE(metadata_evidence.known_event_end >= metadata_evidence.range_end, FALSE)
         AS retention_history_complete
     FROM metadata_evidence
   ),
@@ -273,6 +272,7 @@ AS (
     WHERE metadata_gate.retention_history_complete
       AND DATE_ADD(cohorts.w0, INTERVAL 34 DAY) <= metadata_gate.known_event_end
       AND DATE_ADD(cohorts.w0, INTERVAL 34 DAY) < metadata_gate.measurement_end
+      AND DATE_ADD(cohorts.w0, INTERVAL 35 DAY) <= CURRENT_DATE('Asia/Taipei')
   ),
   retained_cohorts AS (
     SELECT DISTINCT cohort.user_id

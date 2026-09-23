@@ -77,6 +77,48 @@ batch 只要含無法驗證的 row 就不做部分更新；synthetic probe 與 d
 identity／pipeline 不連續或 event bounds 不足時，SQL 仍回傳可觀測期間計數並把 activation、
 cumulative 與 W4 欄位降級為 null／degraded。
 
+## KPI 發布契約與共同驗收
+
+`HistoryCoverage` 是證據驗證邊界；mapping 與直接物件經相同初始化驗證，
+`with_ledger` 是唯一合併入口。`ActivationLedger.history_coverage` 與 legacy
+`history_complete` 參數也經過此邊界。正向證明只接受 literal `True`，不接受 `1`、
+`"true"` 或 `"false"`；deletion 必須是 boolean。無效型別的 reason 在合併後仍保留，
+已知 identity break、pipeline gap、deletion 不能被正向證據覆蓋。Identity 未知時，
+同 measurement version 的另一個有效來源可以明確提供證據；無效輸入則不能被修復為可信。
+Measurement version 必須相符，已提供的 measurement 起訖也不能與 ledger 矛盾。
+
+| KPI／情境 | 必要證據與時間邊界 | 不足時 |
+| --- | --- | --- |
+| New／cumulative activation | Ledger policy、同版本 continuity 與 pipeline 證據；歷史從 measurement 起點覆蓋至報告期末 | null／degraded；不額外等待 W4 |
+| W4 retention | 上述基礎證據；逐 cohort 覆蓋完整 W4，且仍在 measurement 保存窗內 | 只納入完整 cohort；未成熟或缺漏不當作零留存 |
+| W4 日界 | 台北時間半開區間 `[W0+28 天 00:00, W0+35 天 00:00)` | W4 週日任何時刻都未成熟；下一週一零時才可能成熟 |
+| Canonical batch 拒收 | 整批驗證成功才能更新 ledger | 不部分更新、標記 gap；不將錯誤傳回原 analytics request |
+| Duplicate／synthetic probe | 正常排除，不代表 canonical 資料遺失 | 不增加人數，也不製造 gap |
+
+`event_history_end`／SQL `known_event_end` 是**已完整觀察的一天（含該日）**，
+不能填入只有部分資料的當日。Python 另受 `as_of` 限制；SQL 以查詢當下的
+`CURRENT_DATE('Asia/Taipei')` 防止提前成熟，不更改既有 table-function 參數。
+
+共同案例在 `tests/test_usage_kpi_publication.py`：activation 不等待 follow-up、
+W4 週日開始／中午／最後一微秒／週一零時、watermark 落後、部分及全部 cohort 完整，
+以及每個 attestation 欄位的 null、truthy／falsey 非布林輸入、跨版本、負面證據與混合批次。
+
+```bash
+.venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python -m unittest tests.test_usage_kpis tests.test_usage_kpi_publication -v
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+SQL 結果測試從 `render_sql()` 取得完整 weekly SELECT，透過 SQLGlot 轉為 DuckDB，
+僅替換合成來源、輸入日期、時鐘與 Monday-week 方言表示；沒有另寫一份 KPI 計算。
+Python 與 SQL 使用相同時間決策表、型別合法的負面／缺失證據，核對 activation、
+成熟分母與留存率。鬆散型別在 Python 邊界測試，BigQuery metadata 使用 BOOL 欄位；
+SQL 依 measurement version 過濾 ledger，Python 另驗證附加 ledger 的版本一致性。
+測試依賴缺失會失敗，不靜默略過。這些套件僅供測試，不加入 runtime requirements。
+
+本機方言轉換與結果測試不能取代 BigQuery 原生 dry-run、實際合成資料查詢、IAM、
+partition filter、bytes billed 與 pipeline metadata 產生流程的部署前驗收。
+
 ## Funnel 與資料充分性
 
 `tried` 是 verified user 至少一次有效 MCP known tool schema call；unsupported／clarification

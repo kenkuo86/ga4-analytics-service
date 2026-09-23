@@ -593,41 +593,84 @@ class HistoryCoverage:
     ledger_deleted: bool = False
     extra_reasons: tuple[str, ...] = ()
 
-    def evaluate(self, *, report_end: date, ledger_version: str | None = None) -> dict[str, Any]:
+    def __post_init__(self) -> None:
+        # Validate before any merge. Invalid evidence must remain invalid even
+        # when another source supplies a positive attestation.
         reasons = list(self.extra_reasons)
-        if self.measurement_version is None:
-            reasons.append("measurement_version_missing")
-        elif _valid_code(self.measurement_version) is None:
-            reasons.append("measurement_version_invalid")
-        elif ledger_version is not None and self.measurement_version != ledger_version:
-            reasons.append("measurement_version_mismatch")
-        if self.measurement_start is None:
-            reasons.append("measurement_start_missing")
-        if self.measurement_end is None:
-            reasons.append("measurement_end_missing")
-        if self.measurement_end is not None and report_end >= self.measurement_end:
-            reasons.append("measurement_window_expired")
-        if self.ledger_available is not True:
-            reasons.append("ledger_unavailable")
-        if self.ledger_policy_approved is not True:
-            reasons.append("ledger_policy_unapproved")
+        for field in ("ledger_available", "ledger_policy_approved", "pipeline_complete"):
+            value = getattr(self, field)
+            if not isinstance(value, bool):
+                reasons.append(f"{field}_invalid")
+            object.__setattr__(self, field, value is True)
+        if self.identity_continuous is not None and not isinstance(self.identity_continuous, bool):
+            reasons.append("identity_continuity_unverified")
+            object.__setattr__(self, "identity_continuous", None)
         if not isinstance(self.ledger_deleted, bool):
             reasons.append("ledger_deletion_status_invalid")
+            object.__setattr__(self, "ledger_deleted", False)
+        object.__setattr__(self, "extra_reasons", tuple(dict.fromkeys(reasons)))
+
+    def with_ledger(self, ledger: ActivationLedger, zone: ZoneInfo) -> HistoryCoverage:
+        """Merge trusted ledger state without erasing invalid/negative evidence."""
+        start = ledger.measurement_start.astimezone(zone).date() if ledger.measurement_start else self.measurement_start
+        end = ledger.retention_end.astimezone(zone).date() if ledger.retention_end else self.measurement_end
+        reasons = list(self.extra_reasons)
+        if self.measurement_start is not None and start != self.measurement_start:
+            reasons.append("measurement_metadata_mismatch")
+        if self.measurement_end is not None and end != self.measurement_end:
+            reasons.append("measurement_metadata_mismatch")
+        return replace(
+            self,
+            measurement_start=start,
+            measurement_end=end,
+            ledger_policy_approved=self.ledger_policy_approved and ledger.policy_approved is True,
+            identity_continuous=_combine_identity_continuity(self.identity_continuous, ledger.identity_continuous),
+            pipeline_complete=self.pipeline_complete and ledger.pipeline_gap is False,
+            ledger_deleted=self.ledger_deleted or ledger.deleted_or_expired,
+            extra_reasons=tuple(dict.fromkeys(reasons)),
+        )
+
+    def evaluate(self, *, report_end: date, ledger_version: str | None = None) -> dict[str, Any]:
+        base_reasons = list(self.extra_reasons)
+        if self.measurement_version is None:
+            base_reasons.append("measurement_version_missing")
+        elif _valid_code(self.measurement_version) is None:
+            base_reasons.append("measurement_version_invalid")
+        elif ledger_version is not None and self.measurement_version != ledger_version:
+            base_reasons.append("measurement_version_mismatch")
+        if self.measurement_start is None:
+            base_reasons.append("measurement_start_missing")
+        if self.measurement_end is None:
+            base_reasons.append("measurement_end_missing")
+        if self.measurement_end is not None and report_end >= self.measurement_end:
+            base_reasons.append("measurement_window_expired")
+        if self.ledger_available is not True:
+            base_reasons.append("ledger_unavailable")
+        if self.ledger_policy_approved is not True:
+            base_reasons.append("ledger_policy_unapproved")
+        if not isinstance(self.ledger_deleted, bool):
+            base_reasons.append("ledger_deletion_status_invalid")
         elif self.ledger_deleted is True:
-            reasons.append("ledger_deleted_or_expired")
+            base_reasons.append("ledger_deleted_or_expired")
         if self.identity_continuous is False:
-            reasons.append("identity_continuity_break")
+            base_reasons.append("identity_continuity_break")
         elif self.identity_continuous is not True:
-            reasons.append("identity_continuity_unverified")
+            base_reasons.append("identity_continuity_unverified")
         if self.pipeline_complete is not True:
-            reasons.append("pipeline_gap_or_watermark_unknown")
+            base_reasons.append("pipeline_gap_or_watermark_unknown")
         elif self.event_history_start is None or self.event_history_end is None:
-            reasons.append("event_history_bounds_missing")
+            base_reasons.append("event_history_bounds_missing")
         if self.measurement_start is not None and self.event_history_start is not None and self.event_history_start > self.measurement_start:
-            reasons.append("event_history_starts_after_measurement")
+            base_reasons.append("event_history_starts_after_measurement")
+        cohort_reasons = list(base_reasons)
+        cumulative_reasons = list(base_reasons)
         if self.event_history_end is not None and self.event_history_end < report_end:
-            reasons.append("event_history_ends_before_report")
-        reasons = list(dict.fromkeys(reasons))
+            # Activation needs the complete requested period. W4 retention
+            # evaluates this boundary per cohort, so an older fully observed
+            # cohort can remain publishable while a newer one is excluded.
+            cumulative_reasons.append("event_history_ends_before_report")
+        reasons = list(dict.fromkeys(cumulative_reasons))
+        cohort_reasons = list(dict.fromkeys(cohort_reasons))
         status = "complete" if not reasons else "degraded"
         return {
             "status": status,
@@ -638,7 +681,7 @@ class HistoryCoverage:
             "event_history_end": _iso_date(self.event_history_end),
             "reasons": reasons,
             "can_publish_cumulative": status == "complete",
-            "can_publish_cohort": status == "complete",
+            "can_publish_cohort": not cohort_reasons,
         }
 
 
@@ -778,10 +821,6 @@ class ActivationLedger:
         pipeline_complete: bool | None = None,
         identity_continuous: bool | None = None,
     ) -> HistoryCoverage:
-        combined_identity = _combine_identity_continuity(
-            self.identity_continuous,
-            identity_continuous,
-        )
         return HistoryCoverage(
             measurement_version=self.measurement_version,
             measurement_start=self.measurement_start.date() if self.measurement_start else None,
@@ -790,12 +829,10 @@ class ActivationLedger:
             event_history_end=_history_date(event_history_end, ZoneInfo("UTC")),
             ledger_available=True,
             ledger_policy_approved=self.policy_approved,
-            identity_continuous=combined_identity,
-            # A known gap cannot be overridden by a later positive argument;
-            # otherwise completeness must be positively attested.
-            pipeline_complete=not self.pipeline_gap and pipeline_complete is True,
+            identity_continuous=identity_continuous,
+            pipeline_complete=pipeline_complete,  # type: ignore[arg-type]
             ledger_deleted=self.deleted_or_expired,
-        )
+        ).with_ledger(self, ZoneInfo("UTC"))
 
     def snapshot(self) -> tuple[ActivationRecord, ...]:
         return tuple(sorted(self.records.values(), key=lambda record: (record.first_success_at, record.user_id)))
@@ -841,74 +878,33 @@ def _history_from_input(
     ledger_policy_approved: bool,
     zone: ZoneInfo,
 ) -> HistoryCoverage:
-    if isinstance(supplied, HistoryCoverage):
-        coverage = supplied
-        if ledger is not None:
-            measurement_start_date = ledger.measurement_start.astimezone(zone).date() if ledger.measurement_start else coverage.measurement_start
-            measurement_end_date = ledger.retention_end.astimezone(zone).date() if ledger.retention_end else coverage.measurement_end
-            mismatch = []
-            if coverage.measurement_start is not None and measurement_start_date is not None and coverage.measurement_start != measurement_start_date:
-                mismatch.append("measurement_metadata_mismatch")
-            if not isinstance(coverage.ledger_deleted, bool):
-                mismatch.append("ledger_deletion_status_invalid")
-            coverage = replace(
-                coverage,
-                measurement_start=measurement_start_date,
-                measurement_end=measurement_end_date,
-                ledger_available=True,
-                ledger_policy_approved=coverage.ledger_policy_approved is True and ledger.policy_approved,
-                identity_continuous=_combine_identity_continuity(
-                    coverage.identity_continuous,
-                    ledger.identity_continuous,
-                ),
-                pipeline_complete=coverage.pipeline_complete is True and not ledger.pipeline_gap,
-                ledger_deleted=coverage.ledger_deleted is True or ledger.deleted_or_expired,
-                extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
+    if isinstance(supplied, (HistoryCoverage, Mapping)):
+        if isinstance(supplied, HistoryCoverage):
+            coverage = supplied
+        else:
+            # Accept both public history reasons and dataclass round-trips.
+            # Normalized invalid values must never lose their failure evidence.
+            reasons: list[str] = []
+            for key in ("reasons", "extra_reasons"):
+                values = supplied.get(key, ())
+                if not isinstance(values, (list, tuple)) or any(not isinstance(value, str) for value in values):
+                    reasons.append("history_reasons_invalid")
+                else:
+                    reasons.extend(values)
+            coverage = HistoryCoverage(
+                measurement_version=_valid_code(supplied.get("measurement_version")),
+                measurement_start=_history_date(supplied.get("measurement_start"), zone),
+                measurement_end=_history_date(supplied.get("measurement_end"), zone),
+                event_history_start=_history_date(supplied.get("event_history_start"), zone),
+                event_history_end=_history_date(supplied.get("event_history_end"), zone),
+                ledger_available=supplied.get("ledger_available", False),
+                ledger_policy_approved=supplied.get("ledger_policy_approved", False),
+                identity_continuous=supplied.get("identity_continuous"),
+                pipeline_complete=supplied.get("pipeline_complete", False),
+                ledger_deleted=supplied.get("ledger_deleted", False),
+                extra_reasons=tuple(reasons),
             )
-        return coverage
-    if isinstance(supplied, Mapping):
-        coverage = HistoryCoverage(
-            measurement_version=_valid_code(supplied.get("measurement_version")),
-            measurement_start=_history_date(supplied.get("measurement_start"), zone),
-            measurement_end=_history_date(supplied.get("measurement_end"), zone),
-            event_history_start=_history_date(supplied.get("event_history_start"), zone),
-            event_history_end=_history_date(supplied.get("event_history_end"), zone),
-            ledger_available=supplied.get("ledger_available") is True,
-            ledger_policy_approved=supplied.get("ledger_policy_approved") is True,
-            # Only literal booleans are evidence. Missing, null and truthy
-            # strings remain unknown and fail closed.
-            identity_continuous=(
-                supplied.get("identity_continuous")
-                if isinstance(supplied.get("identity_continuous"), bool)
-                else None
-            ),
-            pipeline_complete=supplied.get("pipeline_complete") is True,
-            ledger_deleted=supplied.get("ledger_deleted", False),
-            extra_reasons=tuple(value for value in supplied.get("reasons", ()) if isinstance(value, str)),
-        )
-        if ledger is not None:
-            measurement_start_date = ledger.measurement_start.astimezone(zone).date() if ledger.measurement_start else coverage.measurement_start
-            measurement_end_date = ledger.retention_end.astimezone(zone).date() if ledger.retention_end else coverage.measurement_end
-            mismatch = []
-            if coverage.measurement_start is not None and measurement_start_date is not None and coverage.measurement_start != measurement_start_date:
-                mismatch.append("measurement_metadata_mismatch")
-            if not isinstance(coverage.ledger_deleted, bool):
-                mismatch.append("ledger_deletion_status_invalid")
-            coverage = replace(
-                coverage,
-                measurement_start=measurement_start_date,
-                measurement_end=measurement_end_date,
-                ledger_available=True,
-                ledger_policy_approved=coverage.ledger_policy_approved is True and ledger.policy_approved,
-                identity_continuous=_combine_identity_continuity(
-                    coverage.identity_continuous,
-                    ledger.identity_continuous,
-                ),
-                pipeline_complete=coverage.pipeline_complete is True and not ledger.pipeline_gap,
-                ledger_deleted=coverage.ledger_deleted is True or ledger.deleted_or_expired,
-                extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
-            )
-        return coverage
+        return coverage.with_ledger(ledger, zone) if ledger is not None else coverage
     if ledger is not None:
         return ledger.history_coverage(
             event_history_start=event_history_start,
@@ -1037,7 +1033,7 @@ def _retention(
     for record in records:
         w0 = record.first_success_at.astimezone(zone).date() - timedelta(days=record.first_success_at.astimezone(zone).weekday())
         w4_end = w0 + timedelta(days=34)
-        if report_local < w4_end:
+        if report_local < w0 + timedelta(days=35):
             immature += 1
         elif (
             history_start is None
