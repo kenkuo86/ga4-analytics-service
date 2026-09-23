@@ -291,6 +291,22 @@ def _safe_rate(numerator: int | None, denominator: int | None) -> float | None:
     return round(numerator / denominator, 6)
 
 
+def _funnel_rate(
+    numerator_users: set[str] | None,
+    denominator_users: set[str] | None,
+    *,
+    name: str,
+) -> tuple[float | None, str | None]:
+    """Return a rate only when the two funnel stages form a staircase."""
+    if numerator_users is None or denominator_users is None:
+        return None, f"{name}_stage_unavailable"
+    if not denominator_users:
+        return None, f"{name}_denominator_empty"
+    if not numerator_users.issubset(denominator_users):
+        return None, f"{name}_stages_not_comparable"
+    return _safe_rate(len(numerator_users), len(denominator_users)), None
+
+
 def _percentile(values: Iterable[int | float], percentile: float) -> float | None:
     numbers = sorted(float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(value) and value >= 0)
     if not numbers:
@@ -886,20 +902,28 @@ def _funnel(
 
     eligible_count = len(eligible_users) if eligible_users is not None else None
     authorized_count = len(authorized_users) if authorized_users is not None else None
-    conversion = {
-        "authorized_over_eligible": _safe_rate(authorized_count, eligible_count),
-        "tried_over_authorized": _safe_rate(len(tried_users), authorized_count),
-        # REST activation is observable without an MCP tool-call stage.  In
-        # that mixed-transport case the two sets are not a staircase funnel,
-        # so a ratio could exceed 100% and would be misleading (and invalid
-        # for the versioned rate contract).  Keep the stage counts, but make
-        # the non-comparable rate explicitly unavailable.
-        "activated_over_tried": (
-            _safe_rate(len(activated_users), len(tried_users))
-            if activated_users.issubset(tried_users)
-            else None
-        ),
-    }
+    conversion = {}
+    conversion_reasons = []
+    for name, numerator, denominator in (
+        ("authorized_over_eligible", authorized_users, eligible_users),
+        ("tried_over_authorized", tried_users, authorized_users),
+        ("activated_over_tried", activated_users, tried_users),
+    ):
+        rate, reason = _funnel_rate(numerator, denominator, name=name)
+        conversion[name] = rate
+        if reason is not None:
+            conversion_reasons.append(f"{name}:{reason}")
+    # REST activation is observable without an MCP tool-call stage.  In that
+    # mixed-transport case, and for any other non-staircase input, the ratio
+    # could exceed 100% and would be misleading (and invalid for the versioned
+    # rate contract).  Keep the stage counts and record why the rate is null.
+    transport_note = (
+        "REST activation can exist without an MCP tried stage; funnel rates are "
+        "published only when each numerator user set is a subset of its denominator "
+        "stage."
+    )
+    if conversion_reasons:
+        transport_note += " Unavailable conversion rates: " + ", ".join(conversion_reasons) + "."
     return {
         "eligible": stage(eligible_count, None if eligible_users is not None else "external_denominator_unavailable"),
         "authorized": stage(authorized_count, None if authorized_users is not None else "connection_ledger_unavailable"),
@@ -910,7 +934,7 @@ def _funnel(
             "tried": len(tried_users),
             "activated": len(activated_users),
         },
-        "transport_note": "REST activation can exist without an MCP tried stage; mixed transport stages are not forced into a strict funnel and activated_over_tried is null when the stages are not comparable.",
+        "transport_note": transport_note,
     }
 
 

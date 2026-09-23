@@ -234,6 +234,36 @@ class KPIViewTests(unittest.TestCase):
         self.assertEqual(funnel["tried"]["count"], 1)
         self.assertEqual(funnel["activated"]["count"], 2)
         self.assertIsNone(funnel["conversion_rates"]["activated_over_tried"])
+        self.assertIn("activated_over_tried_stages_not_comparable", funnel["transport_note"])
+
+    def test_funnel_only_publishes_rates_for_staircase_user_sets(self):
+        view = build_kpi_view(
+            [
+                event(1, "2026-09-07T01:00:00Z", who="alice"),
+                event(2, "2026-09-07T02:00:00Z", who="bob"),
+            ],
+            "2026-09-07",
+            "2026-09-07",
+            eligible_users=[self.alice, self.bob],
+            authorized_users=[self.alice],
+            as_of="2026-09-08T00:00:00Z",
+        )
+        funnel = view["funnel"]
+        self.assertEqual(funnel["conversion_rates"]["authorized_over_eligible"], 0.5)
+        self.assertIsNone(funnel["conversion_rates"]["tried_over_authorized"])
+        self.assertIn("tried_over_authorized_stages_not_comparable", funnel["transport_note"])
+
+        reversed_view = build_kpi_view(
+            [],
+            "2026-09-07",
+            "2026-09-07",
+            eligible_users=[self.alice],
+            authorized_users=[self.alice, self.bob],
+            as_of="2026-09-08T00:00:00Z",
+        )
+        reversed_funnel = reversed_view["funnel"]
+        self.assertIsNone(reversed_funnel["conversion_rates"]["authorized_over_eligible"])
+        self.assertIn("authorized_over_eligible_stages_not_comparable", reversed_funnel["transport_note"])
 
     def test_quality_and_demand_keep_preflight_separate_and_do_not_weight_rows(self):
         events = [

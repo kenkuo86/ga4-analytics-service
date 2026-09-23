@@ -77,8 +77,9 @@ cumulative 與 W4 欄位降級為 null／degraded。
 analytics（MCP 或 REST）。`eligible` 需要外部員工資格名單，`authorized` 需要持久 connection
 lifecycle 台帳；兩者缺失時 stage 為 `available=false`，conversion rate 為 null，不以 OAuth
 allowlist、consent page 或 refresh 推造分母。REST user 可以 activated 而沒有 MCP tried，報表
-會標示這不是嚴格階梯 funnel；若 activated 與 tried 不是可比較的階梯集合，
-`activated_over_tried` 保留為 `null`，不發布超過 100% 的比例。
+會標示這不是嚴格階梯 funnel；若 activated 與 tried 不是可比較的階梯集合，或任何前後階段
+不是階梯集合，對應 conversion rate 保留為 `null`，並在 `transport_note` 記錄不可比較的原因；
+不發布超過 100% 的比例。
 
 發布前需要完成以下檢查：
 
