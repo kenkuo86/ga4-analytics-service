@@ -56,11 +56,14 @@ ledger 需明確提供 measurement start、保存政策核准、identity key 連
 `activation.status=degraded`，不發布不受資料支持的累積 activation、首次 cohort 或 W4
 retention。Ledger 刪除、到期、pipeline gap 或 key rotation 造成的斷裂都列入
 `data_freshness.history.reasons`；不能把重新出現的 user 當成新人，也不能把缺失 follow-up
-填成零。
+填成零。Identity continuity 必須由 pipeline 對 measurement version 明確提供正向證據；
+欄位缺失、null 或尚未驗證都視為未知並 fail closed，不因建立新 ledger 自動推定連續。
 
 W4 retention 以首次 activation 所在的週一至週日為 W0，W4 是 W0 後第 28–34 天。只有已完整
 觀察至 W4 結束、ledger 與 event history 均連續的 cohort 才進分母；未成熟 cohort 回傳
-`not_mature`，歷史不足回傳 `insufficient_history`。
+`not_mature`，歷史不足回傳 `insufficient_history`。Activation 只要求事件歷史覆蓋至報告期末；
+W4 則逐 cohort 以已證明的 `known_event_end` 判斷 `w0 + 34` 是否完整，不能用 W4 的額外
+34 天需求連帶隱藏仍可可靠發布的 activation。
 
 背景工作應透過 `update_activation_ledger` 呼叫 ledger。來源故障或批次格式錯誤只回傳固定
 `ledger_update_failed` 並標示 pipeline gap，不把 exception 傳回原本的 GA4 request。

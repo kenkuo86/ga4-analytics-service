@@ -212,13 +212,17 @@ AS (
     FROM {metadata}
     QUALIFY ROW_NUMBER() OVER (ORDER BY pipeline_watermark DESC) = 1
   ),
-  metadata_gate AS (
+  metadata_evidence AS (
     -- Aggregate without GROUP BY deliberately returns one degraded row when
     -- metadata is empty; it must never suppress the observable period counts.
     SELECT
       ANY_VALUE(parameters.range_supported) AS range_supported,
+      ANY_VALUE(parameters.range_start) AS range_start,
+      ANY_VALUE(parameters.range_end) AS range_end,
       COALESCE(MAX(metadata_latest.history_status), 'degraded') AS source_history_status,
       MAX(metadata_latest.measurement_version) AS measurement_version,
+      MAX(metadata_latest.known_event_end) AS known_event_end,
+      MAX(metadata_latest.measurement_end) AS measurement_end,
       COALESCE(LOGICAL_AND(metadata_latest.ledger_available), FALSE)
         AND COALESCE(LOGICAL_AND(metadata_latest.ledger_policy_approved), FALSE)
         AND COALESCE(LOGICAL_AND(metadata_latest.identity_continuous), FALSE)
@@ -226,19 +230,29 @@ AS (
         AND NOT COALESCE(LOGICAL_OR(metadata_latest.ledger_deleted_or_expired), TRUE)
         AND COALESCE(MAX(metadata_latest.known_event_start) <= ANY_VALUE(parameters.range_start), FALSE)
         AND COALESCE(MAX(metadata_latest.known_event_start) <= MAX(metadata_latest.measurement_start), FALSE)
-        AND COALESCE(MAX(metadata_latest.known_event_end) >= DATE_ADD(ANY_VALUE(parameters.range_end), INTERVAL 34 DAY), FALSE)
         AND COALESCE(MAX(metadata_latest.measurement_end) > ANY_VALUE(parameters.range_end), FALSE)
         AND COALESCE(MAX(metadata_latest.history_status) = 'complete', FALSE)
-        AND ANY_VALUE(parameters.range_supported) AS history_complete
+        AND ANY_VALUE(parameters.range_supported) AS ledger_history_complete
     FROM parameters
     LEFT JOIN metadata_latest ON TRUE
+  ),
+  metadata_gate AS (
+    SELECT
+      metadata_evidence.*,
+      metadata_evidence.ledger_history_complete
+        AND COALESCE(metadata_evidence.known_event_end >= metadata_evidence.range_end, FALSE)
+        AS activation_history_complete,
+      metadata_evidence.ledger_history_complete
+        AND COALESCE(metadata_evidence.known_event_end >= metadata_evidence.range_end, FALSE)
+        AS retention_history_complete
+    FROM metadata_evidence
   ),
   scoped_ledger AS (
     SELECT ledger_row.*
     FROM {ledger} AS ledger_row
     CROSS JOIN metadata_gate
     CROSS JOIN parameters
-    WHERE metadata_gate.history_complete
+    WHERE metadata_gate.ledger_history_complete
       AND ledger_row.measurement_version = metadata_gate.measurement_version
       AND DATE(ledger_row.first_success_at, 'Asia/Taipei') <= parameters.range_end
   ),
@@ -251,12 +265,14 @@ AS (
     WHERE DATE_TRUNC(DATE(first_success_at, 'Asia/Taipei'), WEEK(MONDAY)) BETWEEN parameters.range_start AND parameters.range_end
   ),
   mature_cohorts AS (
-    -- The W4 window is complete only when every required follow-up date is
-    -- inside the requested/reportable history boundary.
+    -- Maturity is per cohort and follows the positively attested event-history
+    -- boundary.  It is independent of the requested cohort-selection end.
     SELECT cohorts.*
     FROM cohorts
-    CROSS JOIN parameters
-    WHERE DATE_ADD(cohorts.w0, INTERVAL 34 DAY) <= parameters.range_end
+    CROSS JOIN metadata_gate
+    WHERE metadata_gate.retention_history_complete
+      AND DATE_ADD(cohorts.w0, INTERVAL 34 DAY) <= metadata_gate.known_event_end
+      AND DATE_ADD(cohorts.w0, INTERVAL 34 DAY) < metadata_gate.measurement_end
   ),
   retained_cohorts AS (
     SELECT DISTINCT cohort.user_id
@@ -289,13 +305,13 @@ AS (
     active.successful_requests,
     active.user_day_pairs,
     CASE WHEN metadata_gate.range_supported THEN active.successful_users ELSE NULL END AS observed_period_users,
-    CASE WHEN metadata_gate.history_complete THEN 'available' ELSE 'degraded' END AS activation_status,
-    CASE WHEN metadata_gate.history_complete THEN ledger_counts.new_users ELSE NULL END AS new_activated_users,
-    CASE WHEN metadata_gate.history_complete THEN ledger_counts.cumulative_users ELSE NULL END AS cumulative_activated_users,
-    CASE WHEN metadata_gate.history_complete THEN ledger_counts.ledger_users ELSE NULL END AS ledger_users,
-    CASE WHEN metadata_gate.history_complete THEN (SELECT COUNT(*) FROM mature_cohorts) ELSE NULL END AS mature_w4_users,
-    CASE WHEN metadata_gate.history_complete THEN (SELECT COUNT(*) FROM retained_cohorts) ELSE NULL END AS retained_w4_users,
-    CASE WHEN metadata_gate.history_complete THEN SAFE_DIVIDE((SELECT COUNT(*) FROM retained_cohorts), (SELECT COUNT(*) FROM mature_cohorts)) ELSE NULL END AS w4_retention_rate,
+    CASE WHEN metadata_gate.activation_history_complete THEN 'available' ELSE 'degraded' END AS activation_status,
+    CASE WHEN metadata_gate.activation_history_complete THEN ledger_counts.new_users ELSE NULL END AS new_activated_users,
+    CASE WHEN metadata_gate.activation_history_complete THEN ledger_counts.cumulative_users ELSE NULL END AS cumulative_activated_users,
+    CASE WHEN metadata_gate.activation_history_complete THEN ledger_counts.ledger_users ELSE NULL END AS ledger_users,
+    CASE WHEN metadata_gate.retention_history_complete THEN (SELECT COUNT(*) FROM mature_cohorts) ELSE NULL END AS mature_w4_users,
+    CASE WHEN metadata_gate.retention_history_complete THEN (SELECT COUNT(*) FROM retained_cohorts) ELSE NULL END AS retained_w4_users,
+    CASE WHEN metadata_gate.retention_history_complete THEN SAFE_DIVIDE((SELECT COUNT(*) FROM retained_cohorts), (SELECT COUNT(*) FROM mature_cohorts)) ELSE NULL END AS w4_retention_rate,
     CASE WHEN metadata_gate.range_supported THEN metadata_gate.source_history_status ELSE 'degraded' END AS history_status,
     metadata_gate.measurement_version
   FROM active

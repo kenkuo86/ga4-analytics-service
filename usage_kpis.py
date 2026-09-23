@@ -575,7 +575,10 @@ class HistoryCoverage:
     event_history_end: date | None = None
     ledger_available: bool = False
     ledger_policy_approved: bool = False
-    identity_continuous: bool = True
+    # Continuity is an attestation, not a safe default.  A missing value must
+    # degrade long-lived activation and cohort metrics until the pipeline
+    # positively confirms that the measurement version survived key rotation.
+    identity_continuous: bool | None = None
     pipeline_complete: bool = False
     ledger_deleted: bool = False
     extra_reasons: tuple[str, ...] = ()
@@ -594,8 +597,10 @@ class HistoryCoverage:
             reasons.append("ledger_policy_unapproved")
         if self.ledger_deleted:
             reasons.append("ledger_deleted_or_expired")
-        if not self.identity_continuous:
+        if self.identity_continuous is False:
             reasons.append("identity_continuity_break")
+        elif self.identity_continuous is not True:
+            reasons.append("identity_continuity_unverified")
         if not self.pipeline_complete:
             reasons.append("pipeline_gap_or_watermark_unknown")
         elif self.event_history_start is None or self.event_history_end is None:
@@ -658,6 +663,7 @@ class ActivationLedger:
         measurement_version: str = DEFAULT_MEASUREMENT_VERSION,
         retention_end: Any = None,
         policy_approved: bool = False,
+        identity_continuous: bool | None = None,
     ) -> None:
         if not isinstance(measurement_version, str) or _CODE_RE.fullmatch(measurement_version) is None:
             raise KPIInputError("measurement_version must be a bounded code")
@@ -669,7 +675,9 @@ class ActivationLedger:
         self.policy_approved = bool(policy_approved)
         self.records: dict[str, ActivationRecord] = {}
         self.pipeline_gap = False
-        self.identity_continuous = True
+        if identity_continuous is not None and not isinstance(identity_continuous, bool):
+            raise KPIInputError("identity_continuous must be a boolean attestation")
+        self.identity_continuous = identity_continuous
         self.deleted_or_expired = False
 
     def _eligible_event(self, event: _PreparedEvent) -> bool:
@@ -803,6 +811,19 @@ def _history_from_input(
     ledger_policy_approved: bool,
     zone: ZoneInfo,
 ) -> HistoryCoverage:
+    def combine_identity_continuity(*values: bool | None) -> bool | None:
+        """Combine attestations without letting unknown override evidence.
+
+        Any known break wins.  Otherwise one positive pipeline or ledger
+        attestation is sufficient; complete absence remains unknown and must
+        fail closed in ``HistoryCoverage.evaluate``.
+        """
+        if any(value is False for value in values):
+            return False
+        if any(value is True for value in values):
+            return True
+        return None
+
     if isinstance(supplied, HistoryCoverage):
         coverage = supplied
         if ledger is not None:
@@ -817,7 +838,10 @@ def _history_from_input(
                 measurement_end=measurement_end_date,
                 ledger_available=True,
                 ledger_policy_approved=coverage.ledger_policy_approved and ledger.policy_approved,
-                identity_continuous=coverage.identity_continuous and ledger.identity_continuous,
+                identity_continuous=combine_identity_continuity(
+                    coverage.identity_continuous,
+                    ledger.identity_continuous,
+                ),
                 pipeline_complete=coverage.pipeline_complete and not ledger.pipeline_gap,
                 ledger_deleted=coverage.ledger_deleted or ledger.deleted_or_expired,
                 extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
@@ -831,7 +855,13 @@ def _history_from_input(
             event_history_end=_history_date(supplied.get("event_history_end"), zone),
             ledger_available=bool(supplied.get("ledger_available", ledger is not None)),
             ledger_policy_approved=bool(supplied.get("ledger_policy_approved", ledger_policy_approved)),
-            identity_continuous=bool(supplied.get("identity_continuous", True)),
+            # Only literal booleans are evidence. Missing, null and truthy
+            # strings remain unknown and fail closed.
+            identity_continuous=(
+                supplied.get("identity_continuous")
+                if isinstance(supplied.get("identity_continuous"), bool)
+                else None
+            ),
             pipeline_complete=bool(supplied.get("pipeline_complete", history_complete)),
             ledger_deleted=bool(supplied.get("ledger_deleted", False)),
             extra_reasons=tuple(value for value in supplied.get("reasons", ()) if isinstance(value, str)),
@@ -848,7 +878,10 @@ def _history_from_input(
                 measurement_end=measurement_end_date,
                 ledger_available=True,
                 ledger_policy_approved=coverage.ledger_policy_approved and ledger.policy_approved,
-                identity_continuous=coverage.identity_continuous and ledger.identity_continuous,
+                identity_continuous=combine_identity_continuity(
+                    coverage.identity_continuous,
+                    ledger.identity_continuous,
+                ),
                 pipeline_complete=coverage.pipeline_complete and not ledger.pipeline_gap,
                 ledger_deleted=coverage.ledger_deleted or ledger.deleted_or_expired,
                 extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
@@ -1095,7 +1128,7 @@ def build_kpi_view(
         ledger_records = ledger.snapshot()
         period_ledger_records = [record for record in ledger_records if record.first_success_at <= as_of_dt and start <= record.first_success_at.astimezone(zone).date() <= end]
         activation_status = "available" if coverage["can_publish_cumulative"] else "degraded"
-        activation_new = len(period_ledger_records) if coverage["can_publish_cohort"] else None
+        activation_new = len(period_ledger_records) if coverage["can_publish_cumulative"] else None
         activation_cumulative = sum(1 for record in ledger_records if record.first_success_at <= as_of_dt and record.first_success_at.astimezone(zone).date() <= end) if coverage["can_publish_cumulative"] else None
     else:
         ledger_records = ()

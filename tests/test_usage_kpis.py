@@ -96,6 +96,7 @@ class ActivationLedgerTests(unittest.TestCase):
             measurement_start="2026-08-01T00:00:00Z",
             measurement_version="pilot-v1",
             policy_approved=True,
+            identity_continuous=True,
         )
 
     def test_only_verified_success_analytics_create_idempotent_first_success(self):
@@ -141,6 +142,7 @@ class KPIViewTests(unittest.TestCase):
             measurement_start="2026-08-01T00:00:00Z",
             measurement_version="pilot-v1",
             policy_approved=True,
+            identity_continuous=True,
         )
 
     def complete_history(self):
@@ -151,8 +153,113 @@ class KPIViewTests(unittest.TestCase):
             event_history_end=datetime(2026, 9, 30).date(),
             ledger_available=True,
             ledger_policy_approved=True,
+            identity_continuous=True,
             pipeline_complete=True,
         )
+
+    def test_identity_continuity_requires_positive_attestation(self):
+        event_history = [event(1, "2026-08-03T01:00:00Z", who="alice")]
+        unattested = ActivationLedger(
+            measurement_start="2026-08-01T00:00:00Z",
+            measurement_version="pilot-v1",
+            policy_approved=True,
+        )
+        unattested.apply(event_history)
+        mapping_without_attestation = {
+            "measurement_start": "2026-08-01",
+            "measurement_end": "2027-08-01",
+            "event_history_start": "2026-08-01",
+            "event_history_end": "2026-09-30",
+            "ledger_available": True,
+            "ledger_policy_approved": True,
+            "pipeline_complete": True,
+        }
+        mapping_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history=mapping_without_attestation,
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(mapping_view["activation"]["status"], "degraded")
+        self.assertIsNone(mapping_view["activation"]["cumulative_users"])
+        self.assertIn(
+            "identity_continuity_unverified",
+            mapping_view["activation"]["history_coverage"]["reasons"],
+        )
+
+        truthy_string_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history={**mapping_without_attestation, "identity_continuous": "true"},
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertIn(
+            "identity_continuity_unverified",
+            truthy_string_view["activation"]["history_coverage"]["reasons"],
+        )
+
+        attested_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history={**mapping_without_attestation, "identity_continuous": True},
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(attested_view["activation"]["status"], "available")
+        self.assertEqual(attested_view["activation"]["cumulative_users"], 1)
+
+        unattested.mark_identity_break()
+        broken_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history={**mapping_without_attestation, "identity_continuous": True},
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(broken_view["activation"]["status"], "degraded")
+        self.assertIn(
+            "identity_continuity_break",
+            broken_view["activation"]["history_coverage"]["reasons"],
+        )
+
+    def test_period_activation_remains_available_before_w4_matures(self):
+        events = [event(1, "2026-09-07T01:00:00Z", who="alice")]
+        ledger = ActivationLedger(
+            measurement_start="2026-08-01T00:00:00Z",
+            measurement_version="pilot-v1",
+            policy_approved=True,
+            identity_continuous=True,
+        )
+        ledger.apply(events)
+        history = HistoryCoverage(
+            measurement_start=datetime(2026, 8, 1).date(),
+            measurement_end=datetime(2027, 8, 1).date(),
+            event_history_start=datetime(2026, 8, 1).date(),
+            event_history_end=datetime(2026, 9, 13).date(),
+            ledger_available=True,
+            ledger_policy_approved=True,
+            identity_continuous=True,
+            pipeline_complete=True,
+        )
+        view = build_kpi_view(
+            events,
+            "2026-09-07",
+            "2026-09-13",
+            ledger=ledger,
+            history=history,
+            as_of="2026-09-14T00:00:00Z",
+        )
+        self.assertEqual(view["activation"]["status"], "available")
+        self.assertEqual(view["activation"]["new_users"], 1)
+        self.assertEqual(view["activation"]["cumulative_users"], 1)
+        self.assertEqual(view["retention"]["status"], "not_mature")
+        self.assertIsNone(view["retention"]["rate"])
 
     def test_funnel_never_invents_external_denominators_and_excludes_invalid_mcp_calls(self):
         events = [
@@ -397,7 +504,30 @@ class KPIPlanTests(unittest.TestCase):
         self.assertIn("CREATE OR REPLACE TABLE FUNCTION", sql["usage-kpi-weekly.sql"])
         self.assertIn("w4_retention_rate", sql["usage-kpi-weekly.sql"])
         self.assertIn("DATE_TRUNC", sql["usage-kpi-weekly.sql"])
-        self.assertIn("history_complete", sql["usage-kpi-weekly.sql"])
+        weekly_sql = sql["usage-kpi-weekly.sql"]
+        self.assertIn("ledger_history_complete", weekly_sql)
+        self.assertIn("activation_history_complete", weekly_sql)
+        self.assertIn("retention_history_complete", weekly_sql)
+        self.assertIn(
+            "metadata_evidence.known_event_end >= metadata_evidence.range_end",
+            weekly_sql,
+        )
+        self.assertNotIn(
+            "known_event_end) >= DATE_ADD(ANY_VALUE(parameters.range_end), INTERVAL 34 DAY)",
+            weekly_sql,
+        )
+        self.assertIn(
+            "DATE_ADD(cohorts.w0, INTERVAL 34 DAY) <= metadata_gate.known_event_end",
+            weekly_sql,
+        )
+        self.assertIn(
+            "CASE WHEN metadata_gate.activation_history_complete THEN ledger_counts.new_users",
+            weekly_sql,
+        )
+        self.assertIn(
+            "CASE WHEN metadata_gate.retention_history_complete THEN (SELECT COUNT(*) FROM mature_cohorts)",
+            weekly_sql,
+        )
         self.assertIn("measurement_version", sql["usage-kpi-weekly.sql"])
         self.assertIn("request_kind = 'analytics'", sql["usage-kpi-demand.sql"])
         self.assertIn("tool_name = 'query_ga4'", sql["usage-kpi-demand.sql"])
