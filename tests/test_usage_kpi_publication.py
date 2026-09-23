@@ -141,6 +141,77 @@ class PublicationContractTests(unittest.TestCase):
         self.assertEqual(view["retention"]["rate"], 1.0)
         self.assertEqual(sql["w4_retention_rate"], 1.0)
 
+    def test_ledger_dates_follow_report_timezone_across_history_entry_points(self):
+        ledger = ActivationLedger(
+            measurement_start="2026-08-01T00:00:00+08:00",
+            measurement_version="pilot-v1", policy_approved=True,
+            identity_continuous=True,
+        )
+        ledger.apply(self.events)
+        direct = ledger.history_coverage(
+            event_history_start="2026-08-01", event_history_end="2026-09-30",
+            pipeline_complete=True,
+        )
+        self.assertEqual(direct.measurement_start, date(2026, 8, 1))
+        self.assertEqual(direct.event_history_start, date(2026, 8, 1))
+
+        common = {
+            "measurement_version": "pilot-v1",
+            "measurement_start": date(2026, 8, 1),
+            "measurement_end": date(2027, 8, 1),
+            "event_history_start": date(2026, 8, 1),
+            "event_history_end": date(2026, 9, 30),
+            "ledger_available": True,
+            "ledger_policy_approved": True,
+            "identity_continuous": True,
+            "pipeline_complete": True,
+            "ledger_deleted": False,
+        }
+        inputs = (
+            ("legacy", None),
+            ("direct", direct),
+            ("mapping", {**common, "measurement_start": "2026-08-01", "measurement_end": "2027-08-01",
+                          "event_history_start": "2026-08-01", "event_history_end": "2026-09-30"}),
+            ("object", HistoryCoverage(**common)),
+            ("roundtrip", asdict(HistoryCoverage(**common))),
+            ("offset_mapping", {**common,
+                                 "measurement_start": "2026-08-01T00:00:00+08:00",
+                                 "measurement_end": "2027-08-01T00:00:00+08:00",
+                                 "event_history_start": "2026-08-01T00:00:00+08:00",
+                                 "event_history_end": "2026-09-30T23:59:59+08:00"}),
+        )
+        for name, history in inputs:
+            with self.subTest(path=name):
+                kwargs = {} if history is None else {"history": history}
+                view = build_kpi_view(
+                    self.events, "2026-08-01", "2026-08-31", ledger=ledger,
+                    event_history_start="2026-08-01", event_history_end="2026-09-30",
+                    history_complete=True, as_of="2026-09-30T23:59:59+08:00",
+                    **kwargs,
+                )
+                self.assertEqual(view["activation"]["status"], "available")
+                self.assertEqual(view["activation"]["cumulative_users"], 2)
+                self.assertEqual(view["retention"]["status"], "available")
+                self.assertEqual(view["retention"]["mature_users"], 2)
+
+        utc = ledger.history_coverage(
+            event_history_start="2026-07-31T16:00:00Z",
+            event_history_end="2026-09-30T16:00:00Z",
+            pipeline_complete=True,
+            timezone_name="UTC",
+        )
+        self.assertEqual(utc.measurement_start, date(2026, 7, 31))
+        self.assertEqual(utc.event_history_start, date(2026, 7, 31))
+        utc_view = build_kpi_view(
+            self.events, "2026-08-01", "2026-08-31", ledger=ledger,
+            history_complete=True,
+            event_history_start="2026-07-31T16:00:00Z",
+            event_history_end="2026-09-30T16:00:00Z",
+            timezone_name="UTC", as_of="2026-10-01T00:00:00Z",
+        )
+        self.assertEqual(utc_view["activation"]["status"], "available")
+        self.assertEqual(utc_view["activation"]["cumulative_users"], 2)
+
     def test_partial_history_publishes_only_fully_observed_cohorts(self):
         coverage = replace(BASE, event_history_end=date(2026, 9, 6))
         ledger = ledger_for(self.events)

@@ -98,10 +98,16 @@ Measurement version 必須相符，已提供的 measurement 起訖也不能與 l
 `event_history_end`／SQL `known_event_end` 是**已完整觀察的一天（含該日）**，
 不能填入只有部分資料的當日。Python 另受 `as_of` 限制；SQL 以查詢當下的
 `CURRENT_DATE('Asia/Taipei')` 防止提前成熟，不更改既有 table-function 參數。
+Ledger 內的 measurement timestamp 以 UTC 保存；投影成 history 日期時使用報表的
+`timezone_name`。裸 `YYYY-MM-DD` history 值表示該時區的日曆日期，帶 offset 的時間戳
+則先轉成報表時區再取日期。直接呼叫 `ActivationLedger.history_coverage()` 預設使用
+`Asia/Taipei`，也可傳入 `timezone_name`；這與 `build_kpi_view()` 的時區必須一致。
 
 共同案例在 `tests/test_usage_kpi_publication.py`：activation 不等待 follow-up、
 W4 週日開始／中午／最後一微秒／週一零時、watermark 落後、部分及全部 cohort 完整，
-以及每個 attestation 欄位的 null、truthy／falsey 非布林輸入、跨版本、負面證據與混合批次。
+ledger local-midnight 與 UTC 等價表示、legacy／直接／mapping／object／round-trip history
+入口的一致發布結果，以及每個 attestation 欄位的 null、truthy／falsey 非布林輸入、跨版本、
+負面證據與混合批次。
 
 ```bash
 .venv/bin/python -m pip install -r requirements-test.txt

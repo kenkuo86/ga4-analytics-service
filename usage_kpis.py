@@ -820,19 +820,23 @@ class ActivationLedger:
         event_history_end: Any = None,
         pipeline_complete: bool | None = None,
         identity_continuous: bool | None = None,
+        timezone_name: str = DEFAULT_TIME_ZONE,
     ) -> HistoryCoverage:
+        zone = _timezone(timezone_name)
         return HistoryCoverage(
             measurement_version=self.measurement_version,
-            measurement_start=self.measurement_start.date() if self.measurement_start else None,
-            measurement_end=self.retention_end.date() if self.retention_end else None,
-            event_history_start=_history_date(event_history_start, ZoneInfo("UTC")),
-            event_history_end=_history_date(event_history_end, ZoneInfo("UTC")),
+            # with_ledger supplies the ledger bounds in the same timezone as
+            # the report; do not pre-project the UTC storage dates here.
+            measurement_start=None,
+            measurement_end=None,
+            event_history_start=_history_date(event_history_start, zone),
+            event_history_end=_history_date(event_history_end, zone),
             ledger_available=True,
             ledger_policy_approved=self.policy_approved,
             identity_continuous=identity_continuous,
             pipeline_complete=pipeline_complete,  # type: ignore[arg-type]
             ledger_deleted=self.deleted_or_expired,
-        ).with_ledger(self, ZoneInfo("UTC"))
+        ).with_ledger(self, zone)
 
     def snapshot(self) -> tuple[ActivationRecord, ...]:
         return tuple(sorted(self.records.values(), key=lambda record: (record.first_success_at, record.user_id)))
@@ -913,6 +917,7 @@ def _history_from_input(
             # window and pipeline watermark are complete.  The dashboard job
             # must explicitly attest that fact.
             pipeline_complete=history_complete,
+            timezone_name=zone.key,
         )
     return HistoryCoverage(
         measurement_version=_valid_code(measurement_version),

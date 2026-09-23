@@ -820,6 +820,9 @@ Tool-call、analytics request、inferred session 為三種獨立單位，dashboa
   不得部分更新且須標記 pipeline gap；正常 duplicate／probe 排除不算 gap。測試含
   W4 週日與週一零時、truthy／falsey 非布林值、跨版本及負面證據覆寫；本機 SQL
   相容引擎不能取代 BigQuery 原生部署驗收。詳見 `docs/usage-kpis.md` 發布契約。
+- 使用者 report timezone 是 Python history coverage 的日期投影時區：UTC ledger timestamp、
+  裸 ISO date 與帶 offset history timestamp 在 direct／legacy／mapping／object／round-trip
+  入口都須依同一時區解讀；Asia/Taipei local midnight 不可因 UTC 儲存而多出前一日缺口。
 - Canonical 範例及 serializer 均驗證 summary=null、source=unavailable；摘要只存在於
   專用 30 天附件。第 31 天附件與所有文字副本已到期不可讀，但 canonical event 與 request
   count 仍保留；涵蓋附件重送、亂序、缺失、故障、過期重匯入及 join／export 無長期文字副本。
