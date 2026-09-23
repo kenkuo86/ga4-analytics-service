@@ -690,7 +690,7 @@ class ActivationLedger:
         self.retention_end = _parse_datetime(retention_end, name="retention_end") if retention_end is not None else (
             _add_calendar_year(self.measurement_start) if self.measurement_start is not None else None
         )
-        self.policy_approved = bool(policy_approved)
+        self.policy_approved = policy_approved is True
         self.records: dict[str, ActivationRecord] = {}
         self.pipeline_gap = False
         if identity_continuous is not None and not isinstance(identity_continuous, bool):
@@ -849,6 +849,8 @@ def _history_from_input(
             mismatch = []
             if coverage.measurement_start is not None and measurement_start_date is not None and coverage.measurement_start != measurement_start_date:
                 mismatch.append("measurement_metadata_mismatch")
+            if not isinstance(coverage.ledger_deleted, bool):
+                mismatch.append("ledger_deletion_status_invalid")
             coverage = replace(
                 coverage,
                 measurement_start=measurement_start_date,
@@ -860,7 +862,7 @@ def _history_from_input(
                     ledger.identity_continuous,
                 ),
                 pipeline_complete=coverage.pipeline_complete is True and not ledger.pipeline_gap,
-                ledger_deleted=coverage.ledger_deleted or ledger.deleted_or_expired,
+                ledger_deleted=coverage.ledger_deleted is True or ledger.deleted_or_expired,
                 extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
             )
         return coverage
@@ -890,6 +892,8 @@ def _history_from_input(
             mismatch = []
             if coverage.measurement_start is not None and measurement_start_date is not None and coverage.measurement_start != measurement_start_date:
                 mismatch.append("measurement_metadata_mismatch")
+            if not isinstance(coverage.ledger_deleted, bool):
+                mismatch.append("ledger_deletion_status_invalid")
             coverage = replace(
                 coverage,
                 measurement_start=measurement_start_date,
@@ -901,7 +905,7 @@ def _history_from_input(
                     ledger.identity_continuous,
                 ),
                 pipeline_complete=coverage.pipeline_complete is True and not ledger.pipeline_gap,
-                ledger_deleted=coverage.ledger_deleted or ledger.deleted_or_expired,
+                ledger_deleted=coverage.ledger_deleted is True or ledger.deleted_or_expired,
                 extra_reasons=tuple(dict.fromkeys((*coverage.extra_reasons, *mismatch))),
             )
         return coverage

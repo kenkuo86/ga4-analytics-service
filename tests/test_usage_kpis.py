@@ -258,6 +258,23 @@ class KPIViewTests(unittest.TestCase):
             non_boolean_policy_view["activation"]["history_coverage"]["reasons"],
         )
 
+        invalid_deletion_view = build_kpi_view(
+            event_history,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=unattested,
+            history={
+                **mapping_without_attestation,
+                "identity_continuous": True,
+                "ledger_deleted": 0,
+            },
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertIn(
+            "ledger_deletion_status_invalid",
+            invalid_deletion_view["activation"]["history_coverage"]["reasons"],
+        )
+
         attested_view = build_kpi_view(
             event_history,
             "2026-08-01",
@@ -617,6 +634,36 @@ class KPIViewTests(unittest.TestCase):
         )
         self.assertEqual(view["activation"]["status"], "degraded")
         self.assertIn("ledger_policy_unapproved", view["activation"]["history_coverage"]["reasons"])
+
+        string_policy = ActivationLedger(
+            measurement_start="2026-08-01T00:00:00Z",
+            policy_approved="false",  # type: ignore[arg-type]
+            identity_continuous=True,
+        )
+        string_policy.apply(events)
+        string_view = build_kpi_view(
+            events,
+            "2026-08-01",
+            "2026-08-31",
+            ledger=string_policy,
+            history={
+                "measurement_version": "v1",
+                "measurement_start": "2026-08-01",
+                "measurement_end": "2027-08-01",
+                "event_history_start": "2026-08-01",
+                "event_history_end": "2026-09-30",
+                "ledger_available": True,
+                "ledger_policy_approved": True,
+                "identity_continuous": True,
+                "pipeline_complete": True,
+            },
+            as_of="2026-09-01T00:00:00Z",
+        )
+        self.assertEqual(string_view["activation"]["status"], "degraded")
+        self.assertIn(
+            "ledger_policy_unapproved",
+            string_view["activation"]["history_coverage"]["reasons"],
+        )
 
     def test_weekly_summary_keeps_quality_and_history_metadata(self):
         events = [event(1, "2026-09-07T01:00:00Z")]
