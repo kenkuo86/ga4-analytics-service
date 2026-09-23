@@ -54,6 +54,9 @@
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
+KPI SQL 結果測試需先安裝 `.venv/bin/python -m pip install -r requirements-test.txt`；
+這些套件僅供測試，不加入服務 runtime image，缺少時不可略過發布契約測試。
+
 牽涉 BigQuery schema 或 IAM 時，依 README 執行 dry-run／跨 tenant validation，不得用實際 tenant data query 取代 dry-run。
 
 ## 4. Pull Request 紀錄
@@ -109,6 +112,11 @@ Finding severity：
 ```
 
 直到沒有 blocking findings 為止。修正程式後不得沿用先前的測試結果，也不得略過 final-state validation。
+
+修復發布 gate 的 P1 時，必須列出同一規則的所有輸入入口與實作，以共用案例驗證；
+若 Python 與 SQL 各有實作，須比對執行結果，不能只確認 SQL 字串或其中一條路徑。
+原生雲端引擎尚未驗證時，須明列本機相容引擎測試的限制。
+日期邊界若由 timestamp 投影而來，須明定政策時區並驗證等價 offset 表示在各入口得到相同日曆日期。
 
 ## 7. Merge gate
 

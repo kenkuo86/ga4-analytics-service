@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ga4-analytics-service.internal/telemetry/weekly-summary.schema.v1.json",
+  "title": "GA Analytics weekly usage summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_type", "report_schema_version", "week", "generated_at", "data_freshness", "history_coverage", "kpis", "funnel", "quality", "demand"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "report_type": {"const": "usage_weekly_summary"},
+    "report_schema_version": {"const": "1.0"},
+    "week": {"$ref": "#/$defs/period"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "data_freshness": {"$ref": "#/$defs/dataFreshness"},
+    "history_coverage": {"$ref": "#/$defs/history"},
+    "kpis": {"$ref": "#/$defs/kpis"},
+    "funnel": {"$ref": "#/$defs/funnel"},
+    "quality": {"$ref": "#/$defs/quality"},
+    "demand": {"$ref": "#/$defs/demand"}
+  },
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0},
+    "nullableCount": {"type": ["integer", "null"], "minimum": 0},
+    "rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "date": {"type": "string", "format": "date"},
+    "nullableDate": {"type": ["string", "null"], "format": "date"},
+    "nullableDateTime": {"type": ["string", "null"], "format": "date-time"},
+    "period": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start_date", "end_date", "timezone", "week_start"],
+      "properties": {
+        "start_date": {"$ref": "#/$defs/date"},
+        "end_date": {"$ref": "#/$defs/date"},
+        "timezone": {"type": "string", "minLength": 1},
+        "week_start": {"const": "monday"}
+      }
+    },
+    "history": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "measurement_version", "measurement_start", "measurement_end", "event_history_start", "event_history_end", "reasons", "can_publish_cumulative", "can_publish_cohort"],
+      "properties": {
+        "status": {"enum": ["complete", "degraded"]},
+        "measurement_version": {"type": ["string", "null"], "minLength": 1},
+        "measurement_start": {"$ref": "#/$defs/nullableDate"},
+        "measurement_end": {"$ref": "#/$defs/nullableDate"},
+        "event_history_start": {"$ref": "#/$defs/nullableDate"},
+        "event_history_end": {"$ref": "#/$defs/nullableDate"},
+        "reasons": {"type": "array", "items": {"type": "string"}},
+        "can_publish_cumulative": {"type": "boolean"},
+        "can_publish_cohort": {"type": "boolean"}
+      }
+    },
+    "dataFreshness": {
+      "type": "object", "additionalProperties": false,
+      "required": ["as_of", "latest_event_time", "latest_event_lag_seconds", "history"],
+      "properties": {
+        "as_of": {"type": "string", "format": "date-time"},
+        "latest_event_time": {"$ref": "#/$defs/nullableDateTime"},
+        "latest_event_lag_seconds": {"$ref": "#/$defs/nullableCount"},
+        "history": {"$ref": "#/$defs/history"}
+      }
+    },
+    "identityCoverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verified_events", "total_events", "rate", "unknown_user_events"],
+      "properties": {
+        "verified_events": {"$ref": "#/$defs/count"},
+        "total_events": {"$ref": "#/$defs/count"},
+        "rate": {"$ref": "#/$defs/rate"},
+        "unknown_user_events": {"$ref": "#/$defs/count"}
+      }
+    },
+    "valueCount": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "count"],
+      "properties": {"value": {"type": "string"}, "count": {"$ref": "#/$defs/count"}}
+    },
+    "distribution": {"type": "array", "items": {"$ref": "#/$defs/valueCount"}},
+    "distributionMap": {"type": "object", "additionalProperties": {"$ref": "#/$defs/distribution"}},
+    "distributionMapByKind": {
+      "type": "object", "additionalProperties": false,
+      "required": ["analytics", "capability_preflight"],
+      "properties": {
+        "analytics": {"$ref": "#/$defs/distribution"},
+        "capability_preflight": {"$ref": "#/$defs/distribution"}
+      }
+    },
+    "countMap": {"type": "object", "additionalProperties": {"$ref": "#/$defs/count"}},
+    "countMapByKind": {"type": "object", "additionalProperties": {"$ref": "#/$defs/countMap"}},
+    "resolutionKind": {
+      "type": "object", "additionalProperties": false,
+      "required": ["counts", "known_total", "unknown_count", "rates", "unknown_rate"],
+      "properties": {
+        "counts": {
+          "type": "object", "additionalProperties": false,
+          "required": ["supported", "needs_clarification", "unsupported"],
+          "properties": {
+            "supported": {"$ref": "#/$defs/count"},
+            "needs_clarification": {"$ref": "#/$defs/count"},
+            "unsupported": {"$ref": "#/$defs/count"}
+          }
+        },
+        "known_total": {"$ref": "#/$defs/count"},
+        "unknown_count": {"$ref": "#/$defs/count"},
+        "rates": {
+          "type": "object", "additionalProperties": false,
+          "required": ["supported", "needs_clarification", "unsupported"],
+          "properties": {
+            "supported": {"$ref": "#/$defs/rate"},
+            "needs_clarification": {"$ref": "#/$defs/rate"},
+            "unsupported": {"$ref": "#/$defs/rate"}
+          }
+        },
+        "unknown_rate": {"$ref": "#/$defs/rate"}
+      }
+    },
+    "latencySummary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count", "p50", "p95"],
+      "properties": {
+        "count": {"$ref": "#/$defs/count"},
+        "p50": {"type": ["number", "null"], "minimum": 0},
+        "p95": {"type": ["number", "null"], "minimum": 0}
+      }
+    },
+    "latencyMap": {"type": "object", "additionalProperties": {"$ref": "#/$defs/latencySummary"}},
+    "latencyReport": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count", "p50", "p95", "by_tool", "by_transport"],
+      "properties": {
+        "count": {"$ref": "#/$defs/count"},
+        "p50": {"type": ["number", "null"], "minimum": 0},
+        "p95": {"type": ["number", "null"], "minimum": 0},
+        "by_tool": {"$ref": "#/$defs/latencyMap"},
+        "by_transport": {"$ref": "#/$defs/latencyMap"}
+      }
+    },
+    "funnelStage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count", "available"],
+      "properties": {
+        "count": {"$ref": "#/$defs/nullableCount"},
+        "available": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "funnel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["eligible", "authorized", "tried", "activated", "conversion_rates", "users", "transport_note"],
+      "properties": {
+        "eligible": {"$ref": "#/$defs/funnelStage"},
+        "authorized": {"$ref": "#/$defs/funnelStage"},
+        "tried": {"$ref": "#/$defs/funnelStage"},
+        "activated": {"$ref": "#/$defs/funnelStage"},
+        "conversion_rates": {
+          "type": "object", "additionalProperties": false,
+          "required": ["authorized_over_eligible", "tried_over_authorized", "activated_over_tried"],
+          "properties": {
+            "authorized_over_eligible": {"$ref": "#/$defs/rate"},
+            "tried_over_authorized": {"$ref": "#/$defs/rate"},
+            "activated_over_tried": {"$ref": "#/$defs/rate"}
+          }
+        },
+        "users": {
+          "type": "object", "additionalProperties": false,
+          "required": ["tried", "activated"],
+          "properties": {"tried": {"$ref": "#/$defs/count"}, "activated": {"$ref": "#/$defs/count"}}
+        },
+        "transport_note": {"type": "string"}
+      }
+    },
+    "kpis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["activated_users", "cumulative_activated_users", "successful_requests", "analytics_requests", "successful_users", "repeat_usage_rate", "w4_retention_rate", "failure_rate", "identity_coverage"],
+      "properties": {
+        "activated_users": {"$ref": "#/$defs/nullableCount"},
+        "cumulative_activated_users": {"$ref": "#/$defs/nullableCount"},
+        "successful_requests": {"$ref": "#/$defs/count"},
+        "analytics_requests": {"$ref": "#/$defs/count"},
+        "successful_users": {"$ref": "#/$defs/count"},
+        "repeat_usage_rate": {"$ref": "#/$defs/rate"},
+        "w4_retention_rate": {"$ref": "#/$defs/rate"},
+        "failure_rate": {"$ref": "#/$defs/rate"},
+        "identity_coverage": {"$ref": "#/$defs/identityCoverage"}
+      }
+    },
+    "statusCounts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["success", "failure", "denied", "unsupported", "needs_clarification"],
+      "properties": {
+        "success": {"$ref": "#/$defs/count"},
+        "failure": {"$ref": "#/$defs/count"},
+        "denied": {"$ref": "#/$defs/count"},
+        "unsupported": {"$ref": "#/$defs/count"},
+        "needs_clarification": {"$ref": "#/$defs/count"}
+      }
+    },
+    "quality": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status_counts", "status_counts_by_request_kind", "resolution", "latency_ms", "error_categories", "error_categories_by_status", "unknown_intent_rate", "unknown_host_rate"],
+      "properties": {
+        "status_counts": {"$ref": "#/$defs/statusCounts"},
+        "status_counts_by_request_kind": {"$ref": "#/$defs/countMapByKind"},
+        "resolution": {
+          "type": "object", "additionalProperties": false,
+          "required": ["analytics", "capability_preflight"],
+          "properties": {
+            "analytics": {"$ref": "#/$defs/resolutionKind"},
+            "capability_preflight": {"$ref": "#/$defs/resolutionKind"}
+          }
+        },
+        "latency_ms": {"$ref": "#/$defs/latencyReport"},
+        "error_categories": {"$ref": "#/$defs/distribution"},
+        "error_categories_by_status": {"$ref": "#/$defs/distributionMap"},
+        "unknown_intent_rate": {"$ref": "#/$defs/rate"},
+        "unknown_host_rate": {"$ref": "#/$defs/rate"}
+      }
+    },
+    "periodPattern": {
+      "type": "object", "additionalProperties": false,
+      "required": ["request_kind", "period_type", "requested_days", "comparison_type", "count"],
+      "properties": {
+        "request_kind": {"enum": ["analytics", "capability_preflight"]},
+        "period_type": {"enum": ["explicit_range", "relative_window", "multiple_periods", "unknown"]},
+        "requested_days": {"$ref": "#/$defs/nullableCount"},
+        "comparison_type": {"enum": ["none", "previous_period", "explicit_periods", "unknown"]},
+        "count": {"$ref": "#/$defs/count"}
+      }
+    },
+    "demand": {
+      "type": "object", "additionalProperties": false,
+      "required": ["analysis_goals", "analysis_subjects", "intent_sources", "metrics", "dimensions", "period_patterns", "comparison_types", "unsupported_reasons"],
+      "properties": {
+        "analysis_goals": {"$ref": "#/$defs/distributionMapByKind"},
+        "analysis_subjects": {"$ref": "#/$defs/distributionMapByKind"},
+        "intent_sources": {"$ref": "#/$defs/distributionMapByKind"},
+        "metrics": {"$ref": "#/$defs/distribution"},
+        "dimensions": {"$ref": "#/$defs/distribution"},
+        "period_patterns": {"type": "array", "items": {"$ref": "#/$defs/periodPattern"}},
+        "comparison_types": {"$ref": "#/$defs/distributionMapByKind"},
+        "unsupported_reasons": {"$ref": "#/$defs/distributionMapByKind"}
+      }
+    }
+  }
+}

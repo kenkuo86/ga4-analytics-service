@@ -395,3 +395,50 @@ python -m unittest discover -s tests -v
 ```
 
 測試涵蓋 OAuth metadata、Google OIDC callback stub、email allowlist、consent、PKCE、one-time authorization code、refresh-token rotation、MCP initialize / tools/list、REST bearer protection、traffic summary report contract，以及 semantic catalog 的 profile、衝突、SQL 編譯與查詢保護；不會連線 BigQuery 或修改任何 GCP 資源。BigQuery schema 相容性另外由上方的 dry-run script 驗證。
+
+## Phase 11 使用分析契約
+
+使用分析的已確認政策與資料契約見 [docs/usage-privacy.md](docs/usage-privacy.md)。
+`usage_contract.py`、`telemetry/*.v1.json` 提供版本化 canonical event／摘要附件 schema
+與合成範例。MCP／REST 已將每次驗證後的身分傳入隔離 request context，
+並在 registry／data client 建立前查核共用部門存取政策；預設不收集，雲端資源仍需另行建立。
+資料目標專案為 `ga4-reports-dev`，canonical／summary 保存期限分別為 180／30 天。
+
+啟用 usage 前需從 Secret Manager 注入固定 `USAGE_IDENTITY_KEY`（至少 32 隨機 bytes 的
+base64），不可重用 token signing key 或每次啟動重生。`USAGE_CLIENT_HOSTS` 為受管理的
+OAuth client ID 到 host enum 的 JSON mapping；未設定時 host 為 other。
+目前沒有 key 時仍可正常分析，但 user ID 為 null；`USAGE_ENABLED=true` 則要求 key。
+Telemetry 關閉不撤掉 auth／tenant boundary。IAM 模式沿用外層 Cloud Run 保護，
+不把 header、runtime SA 或共用 client ID 當作人。離線 CLI 不建立 public request context。
+
+11.3 的 `usage_classification.py` 僅使用可信 catalog／report 與 Phase 10 period metadata，
+preflight candidates 不算實際 metrics，explicit dates 不倒推相對措辭或分析 goal。
+摘要採保守詞彙 allowlist：email／電話遮罩，credential／SQL／URL 或未知自由文字
+直接丟棄；最多 500 Unicode 字元。未提供文字時可產生不含客戶名稱的結構化摘要。
+11.4 已加入 MCP 的 optional `request_summary`、`analysis_goal_hint`、`analysis_subject_hint`，
+REST 只提供 enum hints，避免摘要進入 GET URL／access logs。舊 client 可完全省略新欄位。
+
+Usage emission 由 `USAGE_ENABLED` 控制，摘要另由 `USAGE_SUMMARY_ENABLED` 控制，預設都為 false。
+啟用前須完成 [雲端路由驗收](docs/usage-logging.md)，不可直接開關收集而略過 IAM／TTL／告知。
+背景 writer 僅寫 `ga4-reports-dev` 的專用 Cloud Logging log，不在 request 中等待網路或寫 BigQuery。
+
+11.5 的離線[資源計畫與驗收順序](docs/usage-routing.md)可由 `scripts/plan_usage_routing.py`
+產生。已獲授權建立資源並完成[合成驗收](docs/usage-routing-validation.md)。
+
+到達率由 `scripts/probe_usage_routing.py`（純邏輯、永不連網）與
+`scripts/run_usage_routing_probe.py`（網路層，需 `--apply`）量測。Cloud Logging 不承諾
+exactly-once，因此驗收是**量測並揭露到達率**，不宣稱零遺失；rollout 門檻為 canonical 事件
+送達 BigQuery ≥ 95%，以 Wilson 95% 信賴下界判定。探針先寫 canary 確認路由真正生效才開始
+量測——sink 啟用後的生效時間是變動的且可超過 300 秒，等固定秒數會把傳播窗口內的靜默丟棄
+算進遺失率。每條 sink 各自獨立丟棄，故 Logging bucket 的副本不能用來稽核 BigQuery 的副本；
+KPI 的權威來源是 BigQuery。
+
+過期重送在BQ串流暫存仍可查，owner已接受此POC保存例外；仍拒送／排除過期資料。四條路由已停用，未部署或啟用真實收集。
+
+11.6 已加入 [Usage KPI contract 與 view plan](docs/usage-kpis.md)。`usage_kpis.py` 只讀
+canonical 去重事件，分開 tool-call／analytics request／inferred session，並保留 identity、
+intent、period、resolution、latency 與資料新鮮度 coverage。`ActivationLedger` 只保存
+pseudonymous user、最早成功時間與 measurement version；沒有外部 eligible／authorized
+台帳、核准的 ledger 保存政策或連續 history 時，累積 activation／cohort／W4 retention 會
+明確降級，不將缺失填成零。`scripts/plan_usage_kpis.py` 僅產生離線 SQL，不會建立雲端 view 或
+dashboard。

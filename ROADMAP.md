@@ -593,6 +593,12 @@ history 或與 GA Analytics request 無關的文字。所有文字欄位與陣�
 原始事件及其 Cloud Logging、BigQuery、衍生表與匯出副本均適用相同或更短期限；不能僅刪
 dashboard 欄位。下述最小化 activation ledger 是獨立核准的保存類別，不延長原始事件期限。
 
+POC owner 已核准兩項平台例外：BigQuery active TTL 後 2 天 time travel 與 7 天 fail-safe；
+過期事件若繞過 application expiry guard 重送，可能仍在 BigQuery 串流暫存區可查，平台
+不保證移出／清理時間。應用程式仍拒送過期資料，分析函數仍依原 event_time 排除過期資料；
+不得將此例外擴大為延長正常事件 TTL 或任意長期複製。相關驗收按此已核准例外揭露結果，
+不宣稱第 31 天底層所有副本均立即不可讀。完整授權與實測見 `docs/usage-routing-validation.md`。
+
 第一版即採分流，不是可選的差異 TTL：canonical event 的 `request_summary` 固定寫 null、
 `request_summary_source` 固定寫 unavailable，表示「此紀錄未攜帶摘要」，不表示 host 未提供。
 只有摘要附件保存實際來源。完成 redaction／長度限制後，才可向獨立受限 log／table 寫入
@@ -807,6 +813,16 @@ Tool-call、analytics request、inferred session 為三種獨立單位，dashboa
   ledger 仍保留首次時間，不重算新 activation；重送不加人數、late event 修正首次時間與
   cohort。Ledger 缺失／刪除／到期、identity 斷裂及 pipeline gap 必須觸發 history coverage
   降級；follow-up events 到期的 W4 不得顯示零留存或從 ledger 猜測。
+- 11.6 KPI 發布契約使用共用決策表驗證 Python 與 SQL 執行結果：activation 不依賴 W4
+  follow-up、逐 cohort 發布已完整觀察的 subset，台北時間 W4 週日結束後才可成熟。
+  History 證據必須同 measurement version、嚴格 boolean；各 constructor／mapping／
+  直接物件／legacy 入口都不能把無效或負面證據合併成可信。Malformed canonical batch
+  不得部分更新且須標記 pipeline gap；正常 duplicate／probe 排除不算 gap。測試含
+  W4 週日與週一零時、truthy／falsey 非布林值、跨版本及負面證據覆寫；本機 SQL
+  相容引擎不能取代 BigQuery 原生部署驗收。詳見 `docs/usage-kpis.md` 發布契約。
+- 使用者 report timezone 是 Python history coverage 的日期投影時區：UTC ledger timestamp、
+  裸 ISO date 與帶 offset history timestamp 在 direct／legacy／mapping／object／round-trip
+  入口都須依同一時區解讀；Asia/Taipei local midnight 不可因 UTC 儲存而多出前一日缺口。
 - Canonical 範例及 serializer 均驗證 summary=null、source=unavailable；摘要只存在於
   專用 30 天附件。第 31 天附件與所有文字副本已到期不可讀，但 canonical event 與 request
   count 仍保留；涵蓋附件重送、亂序、缺失、故障、過期重匯入及 join／export 無長期文字副本。

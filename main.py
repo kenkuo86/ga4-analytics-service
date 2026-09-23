@@ -12,6 +12,8 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from capability_registry import capability_registry
 from oauth_auth import require_rest_oauth
+from usage_identity import record_resolved_tenant, require_tenant_access
+from usage_logging import observed_handler, observe_metrics, GoalInput, SubjectInput, UsageTransportMiddleware
 from query_policy import (
     QUERY_PROVENANCE_SCHEMA_VERSION,
     PreparedQuery,
@@ -33,6 +35,7 @@ from traffic_summary_report import (
 )
 
 app = FastAPI()
+app.add_middleware(UsageTransportMiddleware)
 
 # 改成你實際存放 tenant_registry 的完整 table ID
 REGISTRY_TABLE = "ora2-439609.ops.tenant_registry"
@@ -82,6 +85,7 @@ class TenantResolutionError(TenantContextErrorMixin, ValueError):
 
 
 def get_bigquery_client():
+    require_tenant_access()
     credentials, detected_project = google.auth.default(
         scopes=[
             "https://www.googleapis.com/auth/cloud-platform",
@@ -107,11 +111,13 @@ def get_tenant_config(
     根據 registry 中的正式名稱或 exact managed alias 取得 GA4 BigQuery 的位置。
     """
 
+    require_tenant_access()
     row, requested_name, resolved_name, match_type = _resolve_tenant_record(
         client,
         customer_name,
     )
     tenant_status = (row.status or "").strip().lower()
+    record_resolved_tenant(row.tenant_id, analytics_allowed=tenant_status == "active")
 
     if tenant_status != "active":
         raise TenantResolutionError(
@@ -438,6 +444,7 @@ def get_customer_status(customer_name: str) -> dict:
     )
     tenant_status = (row.status or "").strip().lower()
     analytics_available = tenant_status == "active" and bool(row.project_id)
+    record_resolved_tenant(row.tenant_id, analytics_allowed=tenant_status == "active")
     return {
         "status": "customer_found",
         "customer_name": row.tenant_name,
@@ -647,6 +654,7 @@ def _query_ga4_semantic_metrics(
         normalized_metric_ids,
         tenant["semantic_profile"],
     )
+    observe_metrics(normalized_metric_ids, resolved_profile)
     profile_resolution = "tenant_registry.ec"
     prepared_metrics: list[dict[str, Any]] = []
     for metric_id in normalized_metric_ids:
@@ -1035,11 +1043,14 @@ def _get_traffic_summary(
     "/traffic-summary",
     dependencies=[Depends(require_rest_oauth)],
 )
+@observed_handler
 def traffic_summary(
     customer_name: str,
     start_date: str,
     end_date: str,
     include_query: bool = False,
+    analysis_goal_hint: GoalInput = None,
+    analysis_subject_hint: SubjectInput = None,
 ):
     try:
         return get_traffic_summary(
@@ -1056,6 +1067,7 @@ def traffic_summary(
         )
     except QueryPolicyError as error:
         status_code = {
+            "tenant_access_denied": 403,
             "daily_query_quota_exceeded": 429,
             "query_cost_estimate_failed": 503,
             "query_timeout": 504,

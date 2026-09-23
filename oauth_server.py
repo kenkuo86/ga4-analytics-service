@@ -458,6 +458,8 @@ class GoogleOAuthAuthorizationServer(
         )
         registry_version = escape(str(metadata["registry_version"]))
         required_scope = escape(self.config.required_scope)
+        from usage_logging import consent_usage_notice
+        usage_notice = consent_usage_notice()
         content = f"""<!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -637,6 +639,7 @@ class GoogleOAuthAuthorizationServer(
           </ul>
         </section>
 
+        {usage_notice}
         <p class="audit-note"><strong>查詢查核：</strong>只有在你明確要求時，才會提供實際 query provenance（SQL、參數與 BigQuery job metadata）。</p>
       </div>
 

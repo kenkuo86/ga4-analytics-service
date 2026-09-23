@@ -11,6 +11,7 @@ from pydantic import AnyHttpUrl
 
 from auth_config import AUTH_MODE_CLOUD_RUN_IAM, AUTH_MODE_OAUTH, OAuthConfig, get_auth_mode
 from oauth_server import GoogleOAuthAuthorizationServer
+from usage_identity import bind_context, trusted_context
 
 
 @dataclass
@@ -38,7 +39,33 @@ def load_auth_runtime() -> AuthRuntime:
 oauth_runtime = load_auth_runtime()
 
 
-async def require_rest_oauth(request: Request) -> AccessToken | None:
+async def require_rest_oauth(request: Request):
+    """Keep verified identity alive through the entire REST dependency lifetime."""
+    access = await _verify_rest_oauth(request)
+    runtime = oauth_runtime
+    context = trusted_context(
+        access, mode=runtime.mode, transport="rest",
+        required_scope=runtime.config.required_scope if runtime.config else "ga4:read",
+    )
+    transport = request.scope.get('usage_transport')
+    if transport is not None:
+        context.started_at = transport['started_at']
+        transport['context'] = context
+    from usage_logging import begin, emitter
+    if emitter.enabled:
+        try:
+            # REST carries only enum hints; no free-text summary in GET URL/access logs.
+            begin(context, 'traffic_summary', {
+                'analysis_goal_hint': request.query_params.get('analysis_goal_hint'),
+                'analysis_subject_hint': request.query_params.get('analysis_subject_hint'),
+            })
+        except Exception:
+            pass
+    with bind_context(context):
+        yield access
+
+
+async def _verify_rest_oauth(request: Request) -> AccessToken | None:
     """Apply the same bearer-token policy to the preserved REST endpoint."""
 
     runtime = oauth_runtime
